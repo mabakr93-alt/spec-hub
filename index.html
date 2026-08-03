@@ -484,7 +484,7 @@ function followupContacts(){ return S.contacts.filter(contactNeedsFollowup).sort
 const PF = {SL:0,ENG:1,CONS:2,CONTR:3,PROJ:4,STATUS:5,CITY:6,COUNTRY:7,APP:8,SBU:9,EXP:10,PO:11,INV:12,SALES:13,SUPD:14,SALUPD:15,TYPE:16,INVVAL:17,YEAR:18,PLAN:19,ORDER:20,FLAG:21};
 const VF = {ID:0,COMPANY:1,TYPE:2,PRIO:3,STATUS:4,PERSON:5,MOBILE:6,EMAIL:7,BUS:8};
 const RF = {ID:0,COMPANY:1,STATUS:2,USER:3,PASS:4,VID:5,DATE:6,SYSTEM:7,AUTH:8,TYPE:9,PRIO:10};
-const TF = {ID:0,NAME:1,BUCKET:2,STATUS:3,PRIO:4,DUE:5,DONE:6,COMMENTS:7,REPEAT:8,LABELS:9,ORDER:10};
+const TF = {ID:0,NAME:1,BUCKET:2,STATUS:3,PRIO:4,DUE:5,DONE:6,COMMENTS:7,REPEAT:8,LABELS:9,ORDER:10,TIME:11};
 const RD = {ID:0,CAT:1,FIELD:2,VAL:3,VALID:4,NOTE:5};
 const TM = {ID:0,NAME:1,ROLE:2,EMAIL:3,FULL:4,SALES:5,FLAG:6,MOBILE:7};
 function salesTeam(){ return S.team.filter(t=>+t[TM.SALES]).sort((a,b)=>a[TM.NAME].toLowerCase()<b[TM.NAME].toLowerCase()?-1:1); }
@@ -801,9 +801,10 @@ const C = document.getElementById('content');
 const KPI_DEF=[
   ['sec','Variable incentive',null],
   ['turnover','Turnover target (Country)','SAR'],
-  ['vlA','Vendor registration — Consultant A','n'],
+  ['vlA','Vendor registration — Consultant A (incl. authorities, developers & online portals)','n'],
   ['vlB','Vendor registration — Consultant B','n'],
   ['vlC','Vendor registration — Consultant C','n'],
+  ['vlOther','of which authorities & developers','n'],
   ['sec2','Fixed incentive',null],
   ['control','Control — tracking sheet & Salesforce quality','zero'],
   ['focus','Focus — specifications converted to business','n'],
@@ -817,7 +818,8 @@ const KPI_DEF=[
 function kpiTargets(){
   const d={turnover:{t:1000000,m:900000,w:25}, vlA:{t:10,m:9,w:25}, vlB:{t:5,m:5,w:25}, vlC:{t:10,m:9,w:25},
     control:{t:0,m:0,w:20,manual:1,val:0}, focus:{t:7,m:7,w:15}, fix:{t:150,m:135,w:20},
-    sem:{t:20,m:18,w:25}, sbu:{t:3,m:3,w:0}, self:{t:2,m:1,w:20,manual:1,val:0}, addl:{t:10,m:0,w:0}};
+    sem:{t:20,m:18,w:25}, sbu:{t:3,m:3,w:0}, self:{t:2,m:1,w:20,manual:1,val:0}, addl:{t:10,m:0,w:0},
+    vlOther:{t:0,m:0,w:0,info:1}};
   S.meta.kpi = S.meta.kpi || {};
   Object.keys(d).forEach(k=>{ S.meta.kpi[k]=Object.assign({}, d[k], S.meta.kpi[k]||{}); });
   return S.meta.kpi;
@@ -827,9 +829,10 @@ function kpiActual(key, y){
   const live=S.projects.filter(p=>p[PF.STATUS]!=='Canceled' && String(p[PF.YEAR])===y);
   switch(key){
     case 'turnover': return live.reduce((s,p)=>s+(+p[PF.INVVAL]||0),0);
-    case 'vlA': return K.byClass.A;
+    case 'vlA': return K.byClass.A + K.byClass.Auth + K.byClass.Dev + onlineRegistered(y).length;
     case 'vlB': return K.byClass.B;
     case 'vlC': return K.byClass.C;
+    case 'vlOther': return K.byClass.Auth + K.byClass.Dev;
     case 'focus': return live.filter(p=>String(p[PF.PO]).toLowerCase()==='yes').length;
     case 'fix': return kpiFix(y);
     case 'sem': return kpiSeminars(y);
@@ -842,37 +845,55 @@ function kpiEditVal(key, v){
   kpiTargets()[key].val=Math.max(0, parseInt(String(v).replace(/\D/g,''),10)||0);
   save('meta'); renderDash();
 }
+function kpiHidden(){ return !!(S.meta && S.meta.kpiHidden); }
+function toggleKpiPrivacy(){
+  S.meta.kpiHidden=!kpiHidden(); save('meta'); renderDash();
+  toast(kpiHidden()?'Figures hidden. Press again to show them.':'Figures visible');
+}
 function renderTargets(y){
   const T=kpiTargets();
+  const hid=kpiHidden();
+  const mask=v=>hid?'•••':v;
   const row=(key,label,unit)=>{
     const t=T[key]; if(!t) return '';
     const act=kpiActual(key,y), tgt=+t.t||0;
     const pct = key==='control' ? (act===0?100:0) : (tgt? Math.min(100, Math.round(act/tgt*100)) : (act?100:0));
+    if(t.info){
+      return `<tr style="background:#F7F9FC">
+        <td style="font-size:12.5px">${esc(label)}</td>
+        <td style="text-align:right;font-weight:800">${hid?'•••':act}</td>
+        <td colspan="4" class="cell-sub">already included in the Consultant A row above</td>
+        <td><span class="pill p-grey">breakdown</span></td></tr>`;
+    }
     const hitMin = key==='control' ? act===0 : act>=(+t.m||0);
     const hitTgt = key==='control' ? act===0 : (tgt? act>=tgt : act>0);
     const col = hitTgt? 'var(--green)' : (hitMin? 'var(--amber)' : 'var(--red)');
     const fmtV = v => unit==='SAR' ? fmtSAR(v) : String(v);
     return `<tr>
       <td style="font-size:12.5px">${esc(label)}${t.manual?' <span class="cell-sub">(you enter this)</span>':''}</td>
-      <td style="text-align:right;font-weight:800;white-space:nowrap">${t.manual
+      <td style="text-align:right;font-weight:800;white-space:nowrap">${hid?'•••':(t.manual
           ? `<input type="number" min="0" value="${act}" style="width:64px;text-align:right" onchange="kpiEditVal('${key}',this.value)">`
-          : fmtV(act)}</td>
-      <td style="text-align:right;white-space:nowrap">${key==='control'?'zero tolerance':fmtV(tgt)}</td>
-      <td style="text-align:right;white-space:nowrap" class="cell-sub">${key==='control'?'—':fmtV(+t.m||0)}</td>
-      <td style="width:150px"><div style="background:var(--soft);border-radius:6px;height:14px;overflow:hidden">
+          : fmtV(act))}</td>
+      <td style="text-align:right;white-space:nowrap">${hid?'•••':(key==='control'?'zero tolerance':fmtV(tgt))}</td>
+      <td style="text-align:right;white-space:nowrap" class="cell-sub">${hid?'•••':(key==='control'?'—':fmtV(+t.m||0))}</td>
+      <td style="width:150px">${hid?'<div class="cell-sub">hidden</div>':`<div style="background:var(--soft);border-radius:6px;height:14px;overflow:hidden">
         <div style="width:${pct}%;height:100%;background:${col};border-radius:6px"></div></div>
-        <div class="cell-sub" style="text-align:right">${pct}%</div></td>
+        <div class="cell-sub" style="text-align:right">${pct}%</div>`}</td>
       <td style="text-align:right;font-weight:700">${t.w?t.w+'%':'—'}</td>
-      <td><span class="pill ${hitTgt?'p-green':(hitMin?'p-amber':'p-red')}">${hitTgt?'target met':(hitMin?'minimum met':'below')}</span></td>
+      <td>${hid?'':`<span class="pill ${hitTgt?'p-green':(hitMin?'p-amber':'p-red')}">${hitTgt?'target met':(hitMin?'minimum met':'below')}</span>`}</td>
     </tr>`;
   };
   return `<div class="card" style="padding:14px 16px;margin-bottom:14px">
     <div class="section-h" style="margin:0 0 10px"><h2>Incentive targets ${y}</h2>
       <span class="hint">progress against your agreed plan</span>
-      <div class="right"><button class="btn sm" onclick="openTargetEditor()">Edit targets</button></div></div>
+      <div class="right">
+        <button class="btn sm ${hid?'navy':''}" onclick="toggleKpiPrivacy()" title="Hide the figures when someone is at your shoulder">${hid?'👁 Show figures':'🙈 Hide figures'}</button>
+        <button class="btn sm" onclick="openTargetEditor()">Edit targets</button></div></div>
     <div class="tbl-wrap" style="box-shadow:none;border:0"><table class="tbl">
       <thead><tr><th>Description</th><th style="text-align:right">Now</th><th style="text-align:right">Target</th><th style="text-align:right">Min 90%</th><th>Progress</th><th style="text-align:right">Weight</th><th></th></tr></thead>
-      <tbody>${KPI_DEF.map(([k,lab,unit])=>k.startsWith('sec')
+      <tbody>${(()=>{const K=mainKpi(y), P=onlineRegistered(y).length;
+        return `<tr><td colspan="7" class="cell-sub" style="padding-top:7px">Registrations ${y}: <b>${hid?'•••':K.total}</b> in total — row A holds <b>${hid?'•••':(K.byClass.A+K.byClass.Auth+K.byClass.Dev+P)}</b> (${hid?'•••':K.byClass.A} consultant A + ${hid?'•••':K.byClass.Auth} authorities + ${hid?'•••':K.byClass.Dev} developer + ${hid?'•••':P} online portals), B <b>${hid?'•••':K.byClass.B}</b>, C <b>${hid?'•••':K.byClass.C}</b>. Nothing is left out.</td></tr>`;})()}
+      ${KPI_DEF.map(([k,lab,unit])=>k.startsWith('sec')
         ? `<tr><td colspan="7" style="background:var(--soft);font-weight:800;font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--red)">${esc(lab)}</td></tr>`
         : row(k,lab,unit)).join('')}</tbody>
     </table></div>
@@ -948,7 +969,7 @@ function renderDash(){
     <div class="kpi" style="opacity:.85"><div class="k-label">Companies with fischer listed</div><div class="k-val">${vs.total}</div>
       <div class="k-note">secondary statistic · vendor list ${vs.list} · drawings only ${vs.draw}</div></div>
     <div class="kpi"><div class="k-label">Sales Leads</div><div class="k-val">${flaggedLeads(y).length}</div><div class="k-note">${y?y+' projects flagged for slides':'all flagged for slides'}</div></div>
-    <div class="kpi"><div class="k-label">Pipeline Expected</div><div class="k-val" style="font-size:19px;padding-top:6px">${fmtSAR(pt.exp)}</div><div class="k-note">Invoiced: ${fmtSAR(pt.inv)}</div></div>
+    <div class="kpi"><div class="k-label">Pipeline Expected</div><div class="k-val" style="font-size:19px;padding-top:6px">${kpiHidden()?'•••':fmtSAR(pt.exp)}</div><div class="k-note">Invoiced: ${kpiHidden()?'•••':fmtSAR(pt.inv)}</div></div>
     <div class="kpi"><div class="k-label">Online portals ${y||''}</div><div class="k-val">${onl.length}<span style="font-size:14px;color:var(--muted)">/${S.onlinereg.length}</span></div><div class="k-note">registered${onlNoDate.length&&y?` · ${onlNoDate.length} undated, only in All time`:''}</div></div>
     <div class="kpi"><div class="k-label">Open Tasks</div><div class="k-val">${openT.length}</div><div class="k-note">${overdue.length? `<span class="due-late">${overdue.length} overdue</span>`:'none overdue'}</div></div>
   </div>
@@ -1025,6 +1046,14 @@ function renderDash(){
       </div>
       <div class="cell-sub" style="margin-top:4px">${last?`Last: <b>${esc(last.x)}</b> · ${fmtDateTime(last.t)}`:'No changes recorded yet.'}
       ${syncCfg().lastSync?` · last sync ${fmtDateTime(syncCfg().lastSync)}`:(syncCfg().token?' · never synced':' · sync not set up, this device only')}</div>
+    </div>`;})()}
+  ${(()=>{const tt=timedTasksToday(); const st=notifyState();
+    if(!tt.length && st==='granted') return '';
+    return `<div class="card" style="padding:11px 15px;margin-top:14px;border-left:4px solid var(--navy)">
+      ${tt.length?`<div style="font-weight:800;font-size:12.5px;margin-bottom:4px">⏰ Timed today</div>
+        <div class="cell-sub">${tt.map(t=>'<b>'+esc(t[TF.TIME])+'</b> '+esc(t[TF.NAME])).join(' · ')}</div>`:''}
+      ${st!=='granted'?`<div class="mini-note" style="margin-top:${tt.length?'7px':'0'}">Alerts currently appear only while the hub is open.
+        <button class="btn sm navy" style="margin-left:6px" onclick="askNotifyPermission()">Turn on desktop notifications</button></div>`:''}
     </div>`;})()}
   <div class="section-h"><h2>Quick actions</h2></div>
   <div style="display:flex;gap:8px;flex-wrap:wrap">
@@ -2929,7 +2958,7 @@ function renderTasks(){
           <div class="t-meta">
             ${taskLabels(t).map(labelChip).join('')}
             ${t[TF.STATUS]==='In progress'?'<span class="pill p-blue">In progress</span>':''}
-            ${t[TF.STATUS]==='Completed'&&t[TF.DONE]?`<span>✓ ${fmtDate(t[TF.DONE])}</span>`:(t[TF.DUE]?`<span class="${t[TF.DUE]<today()&&t[TF.STATUS]!=='Completed'?'due-late':''}">📅 ${fmtDate(t[TF.DUE])}</span>`:'')}
+            ${t[TF.STATUS]==='Completed'&&t[TF.DONE]?`<span>✓ ${fmtDate(t[TF.DONE])}</span>`:(t[TF.DUE]?`<span class="${t[TF.DUE]<today()&&t[TF.STATUS]!=='Completed'?'due-late':''}">📅 ${fmtDate(t[TF.DUE])}${t[TF.TIME]?' ⏰ '+esc(t[TF.TIME]):''}</span>`:'')}
             ${t[TF.PRIO]&&t[TF.PRIO]!=='Medium'?`<span class="pill ${t[TF.PRIO]==='Urgent'?'p-red':t[TF.PRIO]==='Important'?'p-orange':'p-grey'}">${esc(t[TF.PRIO])}</span>`:''}
             ${t[TF.REPEAT]?`<span class="pill p-navy" title="Repeats: ${esc(t[TF.REPEAT])}">🔁 ${esc(t[TF.REPEAT])}</span>`:''}
             ${f.hideComments && t[TF.COMMENTS] ? '💬' : ''}
@@ -3090,13 +3119,14 @@ function cycleTask(id){
 }
 function openTaskForm(id, presetBucket){
   const t=id?S.tasks.find(x=>x[TF.ID]===id):null;
-  const tpl = t || [null,'',presetBucket||'Top of the List','Not started','Medium','','','','','',''];
+  const tpl = t || [null,'',presetBucket||'Top of the List','Not started','Medium','','','','','','',''];
   openForm(t?'Edit task':'New task'+(presetBucket?' — '+presetBucket:''),[
     {k:TF.NAME,label:'Task',type:'text',full:1},
     {k:TF.BUCKET,label:'Bucket',type:'select',opts:SEED_DATA.options.buckets},
     {k:TF.STATUS,label:'Status',type:'select',opts:['Not started','In progress','Completed']},
     {k:TF.PRIO,label:'Priority',type:'select',opts:['Low','Medium','Important','Urgent']},
     {k:TF.DUE,label:'Due date',type:'date'},
+    {k:TF.TIME,label:'Remind me at (time)',type:'time'},
     {k:TF.REPEAT,label:'Repeat (like Planner)',type:'select',opts:REPEAT_OPTS},
     {k:TF.LABELS,label:'Labels (tap to toggle)',type:'labels',full:1},
     {k:TF.COMMENTS,label:'Comments / notes',type:'textarea',full:1},
@@ -3105,7 +3135,7 @@ function openTaskForm(id, presetBucket){
     let target; const prev = t ? t[TF.STATUS] : 'Not started';
     if(t){ Object.entries(vals).forEach(([k,v])=>t[k]=v); if(t[TF.STATUS]==='Completed'&&!t[TF.DONE]) t[TF.DONE]=today(); if(t[TF.STATUS]!=='Completed') t[TF.DONE]=''; target=t; }
     else {
-      const n=[nextId(S.tasks),'','Top of the List','Not started','Medium','','','','','',''];
+      const n=[nextId(S.tasks),'','Top of the List','Not started','Medium','','','','','','',''];
       Object.entries(vals).forEach(([k,v])=>n[k]=v);
       if(n[TF.STATUS]==='Completed'&&!n[TF.DONE]) n[TF.DONE]=today();
       const ords=bucketOrders(n[TF.BUCKET]);
@@ -3648,13 +3678,25 @@ function seminarsAOA(){
   return [h, ...[...S.seminars].sort((a,b)=>(b[SF.DATE]||'')<(a[SF.DATE]||'')?-1:1)
     .map((s,i)=>[i+1, s[SF.DATE]?String(s[SF.DATE]).slice(0,10):'', s[SF.NAME], s[SF.TOPIC]||'', s[SF.SBU]||'', +s[SF.PART]||''])];
 }
+const TRACK_MAIN_BUS=['Fixings','Firestop','MEP','Façade'];
 function trackingAOA(){
   const h=['S.No','Consultant','Priority','Type of Specifier','Handled By','BU','Status','Status Meaning','Seminar','Documentation','FiXperience','Contact Name','Contact Mobile','Contact Email','Portal Website','Portal Username','Portal Password','Notes','New Since'];
   const out=[h];
   S.tracking.forEach(k=>{
-    const nRows=Math.max(k[KF.BUS].length, k[KF.CONTACTS].length, 1);
+    /* every consultant shows the four main business units, even when nothing is set */
+    const bus=[...(k[KF.BUS]||[])];
+    TRACK_MAIN_BUS.forEach(name=>{
+      if(!bus.some(b=>String(b[0]).trim().toLowerCase()===name.toLowerCase()))
+        bus.push([name,'0','No','No','No']);
+    });
+    bus.sort((a,b)=>{
+      const ia=TRACK_MAIN_BUS.findIndex(x=>x.toLowerCase()===String(a[0]).toLowerCase());
+      const ib=TRACK_MAIN_BUS.findIndex(x=>x.toLowerCase()===String(b[0]).toLowerCase());
+      return (ia<0?9:ia)-(ib<0?9:ib);
+    });
+    const nRows=Math.max(bus.length, k[KF.CONTACTS].length, 1);
     for(let i=0;i<nRows;i++){
-      const b=k[KF.BUS][i]||['','','','',''], c=k[KF.CONTACTS][i]||['','',''];
+      const b=bus[i]||['','','','',''], c=k[KF.CONTACTS][i]||['','',''];
       out.push([
         i===0?k[KF.ID]:'', i===0?k[KF.CONS]:'', i===0?k[KF.PRIO]:'', i===0?k[KF.TYPE]:'', i===0?k[KF.HANDLER]:'',
         b[0], b[0]||b[1]?b[1]:'', b[0]||b[1]?(TRACK_STATUS[+b[1]||0]||''):'', b[0]?b[2]:'', b[0]?b[3]:'', b[0]?b[4]:'',
@@ -3683,8 +3725,8 @@ function onlineregAOA(){
   return [h, ...S.onlinereg.map(r=>[r[RF.COMPANY],r[RF.STATUS],r[RF.TYPE]||'Authorities',r[RF.PRIO]||'A',r[RF.USER],r[RF.PASS],r[RF.VID],r[RF.DATE],r[RF.SYSTEM],r[RF.AUTH]])];
 }
 function tasksAOA(){
-  const h=['Task Name','Bucket','Status','Priority','Due Date','Completed Date','Comments','Repeat','Labels'];
-  return [h, ...S.tasks.map(t=>[t[TF.NAME],t[TF.BUCKET],t[TF.STATUS],t[TF.PRIO],t[TF.DUE],t[TF.DONE],t[TF.COMMENTS],t[TF.REPEAT]||'',t[TF.LABELS]||''])];
+  const h=['Task Name','Bucket','Status','Priority','Due Date','Reminder Time','Completed Date','Comments','Repeat','Labels'];
+  return [h, ...S.tasks.map(t=>[t[TF.NAME],t[TF.BUCKET],t[TF.STATUS],t[TF.PRIO],t[TF.DUE],t[TF.TIME]||'',t[TF.DONE],t[TF.COMMENTS],t[TF.REPEAT]||'',t[TF.LABELS]||''])];
 }
 function regdocsAOA(){
   const h=['Category','Field','Value','Valid To','Note'];
@@ -3702,7 +3744,7 @@ const SHEET_DEFS = {
   projects:  {name:'Projects',     fn:projectsAOA,  w:[6,18,26,20,30,16,12,12,30,26,16,9,10,18,34,24,18,14,7,26,24,10]},
   vendors:   {name:'Vendor List',  fn:vendorsAOA,   w:[32,12,7,18,22,16,30, 16,15,15, 16,15,15, 16,15,15, 16,15,15, 16,15,15]},
   onlinereg: {name:'Online Registrations', fn:onlineregAOA, w:[26,16,14,8,30,18,18,12,18,32]},
-  tasks:     {name:'Weekly Plan',  fn:tasksAOA,     w:[42,18,12,10,12,14,36,14,22]},
+  tasks:     {name:'Weekly Plan',  fn:tasksAOA,     w:[42,18,12,10,12,13,14,36,14,22]},
   regdocs:   {name:'Reg Documents',fn:regdocsAOA,   w:[22,32,44,12,18]},
   team:      {name:'Sales Team',   fn:teamAOA,      w:[26,24,34,18,34,16,16]},
 };
@@ -3878,10 +3920,10 @@ const IMPORTERS = {
   }},
   'Weekly Plan': {key:'tasks', label:'Weekly Plan (hub format)', parse(rows){
     const h=rows[0];
-    const ci={na:colIdx(h,'task name','task'),bu:colIdx(h,'bucket'),st:colIdx(h,'status','progress'),pr:colIdx(h,'priority'),du:colIdx(h,'due date'),do2:colIdx(h,'completed date'),cm:colIdx(h,'comments'),rp:colIdx(h,'repeat')};
+    const ci={na:colIdx(h,'task name','task'),bu:colIdx(h,'bucket'),st:colIdx(h,'status','progress'),pr:colIdx(h,'priority'),du:colIdx(h,'due date'),do2:colIdx(h,'completed date'),cm:colIdx(h,'comments'),rp:colIdx(h,'repeat'),tm:colIdx(h,'reminder time')};
     const out=[];
     const lb=colIdx(h,'labels');
-    rows.slice(1).forEach(r=>{ if(r[ci.na]) out.push([out.length+1, r[ci.na], (r[ci.bu]||'').trim(), r[ci.st]||'Not started', r[ci.pr]||'Medium', r[ci.du]||'', r[ci.do2]||'', r[ci.cm]||'', REPEAT_OPTS.includes(r[ci.rp])?r[ci.rp]:'', lb>=0?(r[lb]||''):'']); });
+    rows.slice(1).forEach(r=>{ if(r[ci.na]) out.push([out.length+1, r[ci.na], (r[ci.bu]||'').trim(), r[ci.st]||'Not started', r[ci.pr]||'Medium', r[ci.du]||'', r[ci.do2]||'', r[ci.cm]||'', REPEAT_OPTS.includes(r[ci.rp])?r[ci.rp]:'', lb>=0?(r[lb]||''):'', '', ci.tm>=0?(r[ci.tm]||''):'']); });
     return out;
   }},
   'Consolidated Data': {key:'tasks', label:'Weekly Plan (MS Planner export)', parse(rows){
@@ -3928,6 +3970,85 @@ async function importExcelFile(file){
   }catch(e){ console.error(e); toast('Import failed: '+e.message, true); }
 }
 
+
+/* ================= TIMED ALARMS ================= */
+let _alarmTimer=null;
+function notifyState(){ return (typeof Notification==='undefined') ? 'unsupported' : Notification.permission; }
+async function askNotifyPermission(){
+  if(typeof Notification==='undefined'){ toast('This browser cannot show desktop notifications. The in-app alert still works.', true); return; }
+  const p=await Notification.requestPermission();
+  S.meta.notify = (p==='granted');
+  save('meta');
+  toast(p==='granted' ? 'Desktop notifications are on. You will be alerted even on another tab.' : 'Permission refused, so alerts stay inside the hub.', p!=='granted');
+  renderDash();
+}
+function fireAlarm(t){
+  const body=(t[TF.BUCKET]||'')+(t[TF.COMMENTS]?' — '+String(t[TF.COMMENTS]).slice(0,90):'');
+  try{
+    if(typeof Notification!=='undefined' && Notification.permission==='granted'){
+      const n=new Notification('⏰ '+t[TF.NAME], {body, tag:'spechub-'+t[TF.ID], requireInteraction:true});
+      n.onclick=()=>{ try{ window.focus(); }catch(e){} go('tasks'); };
+    }
+  }catch(e){}
+  try{
+    const A=window.AudioContext||window.webkitAudioContext;
+    if(A){ const c=new A(); const o=c.createOscillator(), g=c.createGain();
+      o.connect(g); g.connect(c.destination); o.frequency.value=880; g.gain.value=0.05;
+      o.start(); setTimeout(()=>{o.stop(); c.close();}, 420); }
+  }catch(e){}
+  document.getElementById('m-title').textContent='⏰ Task due now';
+  document.getElementById('m-body').innerHTML=`
+    <div style="font-size:15px;font-weight:800;margin-bottom:5px" dir="auto">${esc(t[TF.NAME])}</div>
+    <div class="cell-sub" style="margin-bottom:8px"><span class="bucket-tag">${esc(t[TF.BUCKET])}</span> ${fmtDate(t[TF.DUE])} at ${esc(t[TF.TIME]||'')}</div>
+    ${t[TF.COMMENTS]?`<div class="t-comm" style="border:0;padding:0" dir="auto">${esc(t[TF.COMMENTS])}</div>`:''}`;
+  document.getElementById('m-foot').innerHTML=`
+    <button class="btn" onclick="snoozeAlarm(${t[TF.ID]},10)">Snooze 10 min</button>
+    <button class="btn" onclick="snoozeAlarm(${t[TF.ID]},60)">Snooze 1 hour</button>
+    <button class="btn primary" onclick="cycleTask(${t[TF.ID]});cycleTask(${t[TF.ID]});closeModal();refreshTab()">Mark done</button>
+    <button class="btn navy" onclick="closeModal()">Dismiss</button>`;
+  document.getElementById('modal-back').classList.add('open');
+  S.meta.fired = S.meta.fired || {};
+  S.meta.fired[t[TF.ID]] = today()+'T'+(t[TF.TIME]||'');
+  save('meta');
+  logChange('Alarm fired: '+t[TF.NAME], 'Tasks');
+}
+function snoozeAlarm(id, mins){
+  const t=S.tasks.find(x=>x[TF.ID]===id);
+  if(t){
+    const d=new Date(Date.now()+mins*60000);
+    const p=n=>String(n).padStart(2,'0');
+    t[TF.TIME]=p(d.getHours())+':'+p(d.getMinutes());
+    t[TF.DUE]=d.toISOString().slice(0,10);
+    if(S.meta.fired) delete S.meta.fired[id];
+    save('tasks'); save('meta');
+    toast('Snoozed until '+t[TF.TIME]);
+  }
+  closeModal();
+}
+function checkAlarms(){
+  const now=new Date(), p=n=>String(n).padStart(2,'0');
+  const hhmm=p(now.getHours())+':'+p(now.getMinutes());
+  const td=today();
+  S.meta.fired = S.meta.fired || {};
+  S.tasks.forEach(t=>{
+    if(t[TF.STATUS]==='Completed') return;
+    const tm=String(t[TF.TIME]||'').slice(0,5);
+    if(!tm || String(t[TF.DUE]).slice(0,10)!==td) return;
+    if(tm>hhmm) return;                                  /* not yet */
+    if(S.meta.fired[t[TF.ID]]===td+'T'+tm) return;       /* already alerted today */
+    fireAlarm(t);
+  });
+}
+function startAlarms(){
+  if(_alarmTimer) clearInterval(_alarmTimer);
+  _alarmTimer=setInterval(checkAlarms, 30000);
+  setTimeout(checkAlarms, 1500);
+}
+function timedTasksToday(){
+  const td=today();
+  return S.tasks.filter(t=>t[TF.STATUS]!=='Completed' && String(t[TF.TIME]||'').trim() && String(t[TF.DUE]).slice(0,10)===td)
+                .sort((a,b)=>String(a[TF.TIME]).localeCompare(String(b[TF.TIME])));
+}
 
 /* ================= DUE-DATE REMINDERS ================= */
 const REMIND_EMAIL = 'mohamed.bakr@fischer.ae';
@@ -4257,6 +4378,8 @@ function ensureTaskOrders(){
   buildNav();
   go('dash');
   maybeAutoRemind();
+  S.tasks.forEach(t=>{ while(t.length<12) t.push(''); });
+  startAlarms();
   /* if sync is set up, pull whatever the other device pushed, so the phone is never stale */
   if(syncCfg().token && syncCfg().gist && (syncCfg().auto!==false)) setTimeout(()=>doSync(), 900);
 })();
@@ -4285,6 +4408,9 @@ function openSync(){
   if(!c.token || !c.gist){
     document.getElementById('m-body').innerHTML=`
       <div class="mini-note" style="margin-bottom:12px;line-height:1.6">Sync keeps the same data on your laptop and phone through a <b>private file in your own GitHub account</b>. One-time setup, then it's a single button.</div>
+      ${IS_EMBEDDED?`<div class="card" style="padding:10px 13px;margin-bottom:11px;border-left:4px solid var(--red)">
+        <div style="font-weight:800;font-size:12.5px;margin-bottom:3px">This preview window cannot reach GitHub</div>
+        <div class="cell-sub">Connections out of this sandbox are blocked, so connecting here will fail with “Failed to fetch”. Open your GitHub Pages link or the downloaded HTML file and set sync up there. It only needs doing once.</div></div>`:''}
       <div class="f-field full"><label>1 · GitHub token (with “gist” permission)</label>
         <input id="sy-token" placeholder="ghp_… or github_pat_…" value="${esc(c.token||'')}"></div>
       <div class="f-field full"><label>2 · Gist ID — leave blank the first time and I'll create one</label>
@@ -4381,8 +4507,23 @@ async function doSync(firstTime){
   }catch(e){
     console.error(e);
     let msg=String(e.message||e);
-    if(msg.includes('401')) msg='Token rejected — check it has “gist” scope and is copied fully.';
-    else if(msg.includes('read failed')) msg='Can’t read the Gist — check the Gist ID.';
+    if(/failed to fetch|networkerror|load failed/i.test(msg)){
+      msg='this window cannot reach GitHub. Open the hub from your GitHub Pages link or the downloaded file, then sync there.';
+      (()=>{
+        document.getElementById('m-title').textContent='Sync cannot run in this window';
+        document.getElementById('m-body').innerHTML=`
+          <div class="mini-note" style="line-height:1.7">The preview window inside Claude is sandboxed and blocks outgoing connections, so it cannot reach github.com. Nothing is wrong with your token.
+          <br><br><b>Do this instead:</b><br>
+          1 · Open your hosted link, for example <code>https://YOURNAME.github.io/spec-hub</code>, or double-click the downloaded HTML file.<br>
+          2 · Press <b>Sync</b> there, paste the same token, leave the Gist ID empty the first time.<br>
+          3 · It will create the Gist and show you its ID. Use that ID on your phone.</div>`;
+        document.getElementById('m-foot').innerHTML='<button class="btn primary" onclick="closeModal()">Understood</button>';
+        document.getElementById('modal-back').classList.add('open');
+      })();
+    }
+    else if(msg.includes('401')) msg='token rejected. Check it has the “gist” scope and was copied in full.';
+    else if(msg.includes('403')) msg='GitHub refused the request. If the token is new, wait a minute and try again.';
+    else if(msg.includes('read failed')) msg='cannot read that Gist. Check the Gist ID.';
     toast('Sync failed: '+msg, true);
   }
   _syncing=false;
