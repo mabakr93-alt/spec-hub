@@ -348,6 +348,7 @@ tr.row-cancel td .cell-main{color:#B04A56;text-decoration:line-through}
         <div class="logo-chip"><img id="brand-logo" alt="fischer"></div>
         <div class="sub">Specification Hub</div>
         <div class="owner" id="brand-owner">Mohamed Bakr</div>
+        <div class="sub" id="brand-build" style="opacity:.65;font-size:10.5px"></div>
       </div>
     </div>
     <nav id="nav"></nav>
@@ -395,6 +396,7 @@ tr.row-cancel td .cell-main{color:#B04A56;text-decoration:line-through}
 </div></div>
 <div id="toast"></div>
 <div id="popover"></div>
+<input type="file" id="bk-file" accept=".json,application/json" style="position:absolute;left:-9999px;width:1px;height:1px;opacity:0">
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pptxgenjs/3.12.0/pptxgen.bundle.js"></script>
@@ -640,11 +642,14 @@ const PAGE_SUBS = {
 };
 let currentTab='dash';
 const HUB_OWNER = 'Mohamed Bakr';   /* fixed by request: do not change or remove */
+const HUB_BUILD = '2026-08-03';     /* bumped every time I send you a new file */
 function buildNav(){
   const bl=document.getElementById('brand-logo');
   if(bl && !bl.src) bl.src=FISCHER_LOGO_POS;
   const ow=document.getElementById('brand-owner');
   if(ow && ow.textContent!==HUB_OWNER) ow.textContent=HUB_OWNER;   /* always restored */
+  const bd=document.getElementById('brand-build');
+  if(bd) bd.textContent='build '+HUB_BUILD+(IS_EMBEDDED?' · preview':(location.protocol==='file:'?' · local file':' · hosted'));
   document.getElementById('nav').innerHTML = TABS.map(t=>{
     const cnt = {contacts:S.contacts.length, seminars:S.seminars.length, tracking:S.tracking.length, projects:S.projects.length,
                  vendors:S.vendors.length+S.onlinereg.length, tasks:S.tasks.filter(x=>x[TF.STATUS]!=='Completed').length}[t.id];
@@ -1041,6 +1046,7 @@ function renderDash(){
       <div class="section-h" style="margin:0">
         <h2>Saved on this device — ${lg.length} change${lg.length===1?'':'s'} recorded</h2>
         <div class="right">
+          <button class="btn sm" onclick="openUpgradeGuide()" title="How to install a new version without losing anything">⬆ New version?</button>
           <button class="btn sm" onclick="openChangeLog()">Open change log</button>
         </div>
       </div>
@@ -2661,6 +2667,37 @@ function updateFollowupCount(){
   if(currentTab==='tasks') renderTasks();
 }
 
+/* ================= UPGRADE HELPER ================= */
+function openUpgradeGuide(){
+  const c=syncCfg();
+  const synced=!!(c.token && c.gist);
+  document.getElementById('m-title').textContent='Installing a new version';
+  document.getElementById('m-body').innerHTML=`
+    <div class="mini-note" style="margin-bottom:11px;line-height:1.7">This copy is <b>build ${HUB_BUILD}</b>, running ${IS_EMBEDDED?'in the Claude preview':(location.protocol==='file:'?'from a local file':'from your hosted link')}.</div>
+    ${synced
+      ? `<div class="card" style="padding:11px 14px;border-left:4px solid var(--green);margin-bottom:11px">
+          <div style="font-weight:800;font-size:12.5px">Sync is on, so upgrades are painless</div>
+          <div class="cell-sub">Replace index.html on GitHub and open the page. Your data arrives by itself, nothing to re-enter.<br>Gist: <code style="user-select:all">${esc(c.gist)}</code></div></div>`
+      : `<div class="card" style="padding:11px 14px;border-left:4px solid var(--red);margin-bottom:11px">
+          <div style="font-weight:800;font-size:12.5px">Sync is not set up yet</div>
+          <div class="cell-sub">Until it is, every new file starts empty and you have to restore a backup by hand. Setting it up once removes that step for good.</div>
+          <div style="margin-top:7px"><button class="btn sm navy" onclick="closeModal();openSync()">Set up sync now</button></div></div>`}
+    <div class="doc-sec"><h3>Each time I send a new file</h3>
+      <div style="font-size:12.5px;line-height:1.9">
+        1 · Rename the download to <b>index.html</b><br>
+        2 · GitHub → your <b>spec-hub</b> repo → <b>Add file → Upload files</b> → drop it in → <b>Commit changes</b><br>
+        3 · Wait a minute, open your page, hard refresh with <b>Ctrl+Shift+R</b><br>
+        4 · Check the build date under your name in the sidebar${synced?'':'<br>5 · Restore your backup file, since sync is off'}
+      </div></div>
+    <div class="doc-sec"><h3>Before you upgrade</h3>
+      <div style="font-size:12.5px;line-height:1.9">Press <b>💾 Save</b>, then ${synced?'<b>⟳ Sync</b> so the Gist holds your latest work':'<b>⬇ Backup</b> and keep the file'}.</div></div>`;
+  document.getElementById('m-foot').innerHTML=`
+    <button class="btn" onclick="closeModal()">Close</button>
+    ${synced?`<button class="btn navy" onclick="closeModal();doSync()">⟳ Sync now</button>`:''}
+    <button class="btn primary" onclick="downloadBackupFile()">⬇ Backup first</button>`;
+  document.getElementById('modal-back').classList.add('open');
+}
+
 /* ================= BACKUP FILE ================= */
 async function saveNow(){
   setSaveDot('saving','Saving…');
@@ -2689,7 +2726,32 @@ function downloadBackupFile(){
     toast('Backup saved. Keep this file: it restores everything into any copy of the hub.');
   }catch(e){ toast('Backup failed: '+e.message, true); }
 }
-function pickBackupFile(){ const el=document.getElementById('bk-file'); if(el) el.click(); }
+function pickBackupFile(){
+  let el=document.getElementById('bk-file');
+  if(!el){
+    el=document.createElement('input');
+    el.type='file'; el.id='bk-file'; el.accept='.json,application/json';
+    el.style.cssText='position:absolute;left:-9999px;width:1px;height:1px;opacity:0';
+    document.body.appendChild(el);
+  }
+  el.onchange=function(){ const f=this.files && this.files[0]; this.value=''; if(f) restoreFromFile(f); };
+  try{ el.click(); }
+  catch(e){ openRestoreFallback(); return; }
+  /* if the browser silently refused, offer a picker the user can click directly */
+  setTimeout(()=>{ if(!el.files || !el.files.length) openRestoreFallback(); }, 1200);
+}
+function openRestoreFallback(){
+  if(document.getElementById('rf-input')) return;
+  document.getElementById('m-title').textContent='Restore from a backup file';
+  document.getElementById('m-body').innerHTML=`
+    <div class="mini-note" style="margin-bottom:11px;line-height:1.7">Choose the <b>.json</b> backup you saved with the ⬇ Backup button. On iPhone pick <b>Browse</b> and look in Downloads or wherever you saved it.</div>
+    <input type="file" id="rf-input" accept=".json,application/json" style="font-size:14px;padding:10px;border:1px dashed var(--line);border-radius:9px;width:100%">
+    <div class="mini-note" style="margin-top:9px">Nothing is replaced until you confirm on the next screen.</div>`;
+  document.getElementById('m-foot').innerHTML='<button class="btn" onclick="closeModal()">Cancel</button>';
+  document.getElementById('modal-back').classList.add('open');
+  const inp=document.getElementById('rf-input');
+  if(inp) inp.onchange=function(){ const f=this.files && this.files[0]; if(f) restoreFromFile(f); };
+}
 async function restoreFromFile(file){
   if(!file) return;
   try{
