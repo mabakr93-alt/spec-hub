@@ -642,14 +642,19 @@ const PAGE_SUBS = {
 };
 let currentTab='dash';
 const HUB_OWNER = 'Mohamed Bakr';   /* fixed by request: do not change or remove */
-const HUB_BUILD = '2026-08-03';     /* bumped every time I send you a new file */
+const HUB_BUILD = '2026-08-04 06:35 UTC';   /* stamped when this file was generated */
 function buildNav(){
   const bl=document.getElementById('brand-logo');
   if(bl && !bl.src) bl.src=FISCHER_LOGO_POS;
   const ow=document.getElementById('brand-owner');
   if(ow && ow.textContent!==HUB_OWNER) ow.textContent=HUB_OWNER;   /* always restored */
   const bd=document.getElementById('brand-build');
-  if(bd) bd.textContent='build '+HUB_BUILD+(IS_EMBEDDED?' · preview':(location.protocol==='file:'?' · local file':' · hosted'));
+  if(bd){
+    bd.textContent='build '+HUB_BUILD+(IS_EMBEDDED?' · preview':(location.protocol==='file:'?' · local file':' · hosted'));
+    bd.title='Click to copy this build stamp';
+    bd.style.cursor='pointer';
+    bd.onclick=()=>copyText(HUB_BUILD,'build stamp');
+  }
   document.getElementById('nav').innerHTML = TABS.map(t=>{
     const cnt = {contacts:S.contacts.length, seminars:S.seminars.length, tracking:S.tracking.length, projects:S.projects.length,
                  vendors:S.vendors.length+S.onlinereg.length, tasks:S.tasks.filter(x=>x[TF.STATUS]!=='Completed').length}[t.id];
@@ -2714,12 +2719,13 @@ function stampNow(){
 }
 function downloadBackupFile(){
   try{
-    const snap={hub:'fischer Spec Hub', v:3, saved:new Date().toISOString(), counts:dataCounts(), data:{}};
+    const snap={hub:'fischer Spec Hub', v:3, build:(typeof HUB_BUILD!=='undefined'?HUB_BUILD:''), saved:new Date().toISOString(), counts:dataCounts(), data:{}};
     KEYS.forEach(k=>snap.data[k]=S[k]);
     const blob=new Blob([JSON.stringify(snap)],{type:'application/json'});
     const url=URL.createObjectURL(blob);
     const a=document.createElement('a');
     a.href=url; a.download='fischer_Spec_Hub_backup_'+stampNow()+'.json';
+    snap.build=HUB_BUILD;
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(()=>URL.revokeObjectURL(url),1500);
     logChange('Backup file downloaded', 'Backup');
@@ -2759,6 +2765,7 @@ async function restoreFromFile(file){
     if(!snap || !snap.data) throw new Error('not a hub backup file');
     const c=snap.counts||{};
     const ok=await appConfirm('Restore this backup?\n\nSaved: '+(snap.saved?fmtDateTime(new Date(snap.saved).getTime()):'unknown')+
+      (snap.build?'\nSaved from build '+snap.build:'')+
       '\ncontacts '+(c.contacts??'?')+' · seminars '+(c.seminars??'?')+' ('+(c.sbuFilled??'?')+' with SBU)'+
       ' · tracking '+(c.tracking??'?')+' · projects '+(c.projects??'?')+' · vendors '+(c.vendors??'?')+' · tasks '+(c.tasks??'?')+
       '\n\nEverything currently in this copy is replaced.','Restore');
@@ -4527,6 +4534,14 @@ function openSync(){
       <div style="display:flex;gap:7px;flex-wrap:wrap;margin-bottom:11px">
         <button class="btn sm navy" onclick="copySetupCode()">📋 Copy setup code for my phone</button>
         <button class="btn sm" onclick="copyText(syncCfg().gist||'','Gist ID')">Copy Gist ID</button>
+        <button class="btn sm" onclick="inspectRemote()">🔍 What is in the cloud?</button>
+      </div>
+      <div class="doc-sec"><h3>Force a direction</h3>
+        <div class="mini-note" style="margin-bottom:7px">Use these when the automatic sync picked the wrong way round. Each one takes a restore point first.</div>
+        <div style="display:flex;gap:7px;flex-wrap:wrap">
+          <button class="btn sm" style="border-color:var(--navy);color:var(--navy)" onclick="forceSync('push')">⬆ Send this device to the cloud</button>
+          <button class="btn sm" style="border-color:var(--red);color:var(--red)" onclick="forceSync('pull')">⬇ Replace this device from the cloud</button>
+        </div>
       </div>
       <div style="text-align:center;padding:8px 0"><button class="btn primary" style="font-size:15px;padding:11px 26px" onclick="doSync()">⟳ Sync now</button></div>
       <div class="mini-note" style="margin-top:6px">Merges both ways: pushes newer local edits up, pulls newer remote edits down.</div>`;
@@ -4570,6 +4585,59 @@ async function gistPut(token, gist, data){
 }
 
 let _syncing=false, _pendingRemote=null;
+async function inspectRemote(){
+  const c=syncCfg();
+  if(!c.token || !c.gist){ toast('Not connected yet', true); return; }
+  toast('Reading the cloud copy…');
+  try{
+    const r=await gistGet(c.token, c.gist);
+    if(!r){ toast('The Gist is empty. Press “Send this device to the cloud”.', true); return; }
+    const L=dataCounts();
+    document.getElementById('m-title').textContent='This device compared with the cloud';
+    document.getElementById('m-body').innerHTML=`
+      <table class="tbl"><thead><tr><th></th><th style="text-align:right">This device</th><th style="text-align:right">Cloud copy</th></tr></thead><tbody>
+        ${[['contacts','Contacts'],['seminars','Seminars'],['tracking','Team tracking'],['projects','Projects'],['vendors','Vendors'],['tasks','Tasks']]
+          .map(([k,lab])=>`<tr><td style="font-size:12px">${lab}</td>
+            <td style="text-align:right;font-weight:700">${L[k]}</td>
+            <td style="text-align:right;font-weight:700">${(r[k]||[]).length}</td></tr>`).join('')}
+        <tr><td style="font-size:12px">Last edited</td>
+          <td style="text-align:right;font-size:11.5px">${fmtDateTime((S.meta&&S.meta.lastEdit)||0)}</td>
+          <td style="text-align:right;font-size:11.5px">${fmtDateTime(r._lastEdit||0)}</td></tr>
+      </tbody></table>
+      <div class="mini-note" style="margin-top:9px">If the cloud column is behind, the other device has not pushed yet: open it and press ⟳ Sync there.</div>`;
+    document.getElementById('m-foot').innerHTML=`<button class="btn" onclick="closeModal()">Close</button>
+      <button class="btn navy" onclick="closeModal();forceSync('pull')">⬇ Take the cloud copy</button>`;
+    document.getElementById('modal-back').classList.add('open');
+  }catch(e){ toast('Could not read the cloud copy: '+e.message, true); }
+}
+async function forceSync(dir){
+  const c=syncCfg();
+  if(!c.token){ openSync(); return; }
+  const label = dir==='push' ? 'Send everything on this device up, overwriting the cloud copy?'
+                             : 'Replace everything on this device with the cloud copy?';
+  if(!(await appConfirm(label+'\n\nA restore point is saved first.', dir==='push'?'Send up':'Replace here'))) return;
+  await makeBackup('before forced '+dir);
+  try{
+    if(dir==='push'){
+      const snap=snapshot(); snap._lastEdit=Date.now();
+      const res=await gistPut(c.token, c.gist, snap);
+      if(!c.gist && res && res.id) c.gist=res.id;
+      S.meta.lastEdit=snap._lastEdit; save('meta');
+      toast('Sent up. Open the other device and it will pull this automatically.');
+      logChange('Forced push to the cloud', 'Sync');
+    } else {
+      const r=await gistGet(c.token, c.gist);
+      if(!r) throw new Error('the cloud copy is empty');
+      await applySnapshot(r);
+      buildNav(); go(currentTab);
+      toast('This device now matches the cloud copy.');
+      logChange('Forced pull from the cloud', 'Sync');
+    }
+    c.lastSync=Date.now(); saveSyncCfg(c);
+    const dot=document.getElementById('sync-dot'); if(dot) dot.style.display='none';
+    closeModal();
+  }catch(e){ toast('Failed: '+e.message, true); }
+}
 async function resolveSync(side){
   const c=syncCfg();
   try{
