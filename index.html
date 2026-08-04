@@ -4464,6 +4464,32 @@ async function applySnapshot(snap){
   for(const k of KEYS) await sset(k);
 }
 
+function tokenTail(t){ t=String(t||''); return t? '…'+t.slice(-6) : '(none)'; }
+function setupCode(){
+  const c=syncCfg();
+  if(!c.token) return '';
+  try{ return 'SPECHUB1.'+btoa(unescape(encodeURIComponent(JSON.stringify({t:c.token,g:c.gist||''})))); }
+  catch(e){ return ''; }
+}
+async function copySetupCode(){
+  const code=setupCode();
+  if(!code){ toast('Connect on this device first', true); return; }
+  await copyText(code, 'setup code');
+  toast('Setup code copied. Email it to yourself, then paste it on the phone.');
+}
+function applySetupCode(raw){
+  const s=String(raw||'').trim();
+  if(!s.startsWith('SPECHUB1.')){ toast('That is not a setup code. It begins with SPECHUB1.', true); return false; }
+  try{
+    const o=JSON.parse(decodeURIComponent(escape(atob(s.slice(9)))));
+    if(!o.t) throw new Error('no token');
+    saveSyncCfg({token:o.t, gist:o.g||''});
+    toast('Setup code accepted. Syncing…');
+    closeModal();
+    doSync(true);
+    return true;
+  }catch(e){ toast('Could not read that code: '+e.message, true); return false; }
+}
 function openSync(){
   const c=syncCfg();
   document.getElementById('m-title').textContent='Sync across devices';
@@ -4477,14 +4503,31 @@ function openSync(){
         <input id="sy-token" placeholder="ghp_… or github_pat_…" value="${esc(c.token||'')}"></div>
       <div class="f-field full"><label>2 · Gist ID — leave blank the first time and I'll create one</label>
         <input id="sy-gist" placeholder="(blank on first device)" value="${esc(c.gist||'')}"></div>
-      <div class="mini-note" style="margin-top:6px">On your second device, paste the <b>same token</b> and the <b>Gist ID</b> shown after the first sync.</div>`;
+      <div class="mini-note" style="margin-top:6px">On your second device, paste the <b>same token</b> and the <b>Gist ID</b> shown after the first sync.</div>
+      <div class="doc-sec" style="margin-top:14px"><h3>Or paste a setup code</h3>
+        <div class="mini-note" style="margin-bottom:6px">Quicker on a phone. Press <b>Copy setup code</b> on the device that is already connected, send it to yourself, and paste it here. It carries the token and the Gist ID together.</div>
+        <input id="sy-code" placeholder="SPECHUB1.…">
+        <button class="btn sm primary" style="margin-top:7px" onclick="applySetupCode(document.getElementById('sy-code').value)">Use setup code</button>
+      </div>`;
     document.getElementById('m-foot').innerHTML=`
       <button class="btn" onclick="closeModal()">Cancel</button>
       <button class="btn primary" onclick="connectSync()">Connect & sync now</button>`;
   } else {
     const last = c.lastSync ? fmtDateTime(c.lastSync) : 'never';
     document.getElementById('m-body').innerHTML=`
-      <div class="mini-note" style="margin-bottom:12px;line-height:1.6">Connected to your private Gist.<br>Gist ID: <code style="user-select:all">${esc(c.gist)}</code><br>Last sync: ${last}</div>
+      <div class="card" style="padding:11px 14px;margin-bottom:11px">
+        <div style="font-weight:800;font-size:12.5px;margin-bottom:5px">This device is connected</div>
+        <table class="tbl"><tbody>
+          <tr><td style="width:110px;font-size:12px">Token ends in</td><td><code style="user-select:all">${esc(tokenTail(c.token))}</code></td></tr>
+          <tr><td style="font-size:12px">Gist ID</td><td><code style="user-select:all">${esc(c.gist||'(not created yet)')}</code></td></tr>
+          <tr><td style="font-size:12px">Last sync</td><td style="font-size:12px">${last}</td></tr>
+        </tbody></table>
+        <div class="mini-note" style="margin-top:7px">Both devices are joined when these two values match. Compare them on the phone, they must be identical.</div>
+      </div>
+      <div style="display:flex;gap:7px;flex-wrap:wrap;margin-bottom:11px">
+        <button class="btn sm navy" onclick="copySetupCode()">📋 Copy setup code for my phone</button>
+        <button class="btn sm" onclick="copyText(syncCfg().gist||'','Gist ID')">Copy Gist ID</button>
+      </div>
       <div style="text-align:center;padding:8px 0"><button class="btn primary" style="font-size:15px;padding:11px 26px" onclick="doSync()">⟳ Sync now</button></div>
       <div class="mini-note" style="margin-top:6px">Merges both ways: pushes newer local edits up, pulls newer remote edits down.</div>`;
     document.getElementById('m-foot').innerHTML=`
@@ -4526,7 +4569,25 @@ async function gistPut(token, gist, data){
   return await r.json();
 }
 
-let _syncing=false;
+let _syncing=false, _pendingRemote=null;
+async function resolveSync(side){
+  const c=syncCfg();
+  try{
+    if(side==='remote' && _pendingRemote){
+      await applySnapshot(_pendingRemote);
+      buildNav(); go(currentTab);
+      logChange('Sync conflict resolved: took the cloud copy', 'Sync');
+      toast('Cloud copy restored on this device');
+    } else {
+      await gistPut(c.token, c.gist, snapshot());
+      logChange('Sync conflict resolved: kept this device', 'Sync');
+      toast('This device pushed over the cloud copy');
+    }
+    c.lastSync=Date.now(); saveSyncCfg(c);
+    const dot=document.getElementById('sync-dot'); if(dot) dot.style.display='none';
+  }catch(e){ toast('Could not finish: '+e.message, true); }
+  _pendingRemote=null;
+}
 async function doSync(firstTime){
   if(_syncing) return;
   const c=syncCfg();
@@ -4548,10 +4609,44 @@ async function doSync(firstTime){
       c.lastSync=Date.now();
       saveSyncCfg(c);
       const dot=document.getElementById('sync-dot'); if(dot) dot.style.display='none';
-      appConfirm('First sync done. Your Gist ID is:\n\n'+c.gist+'\n\nOn your phone, open Sync, paste the same token and THIS Gist ID. (Also shown anytime under the Sync button.)','Got it');
+      document.getElementById('m-title').textContent='Connected — now join your phone';
+      document.getElementById('m-body').innerHTML=`
+        <div class="mini-note" style="margin-bottom:10px;line-height:1.7">Your private Gist was created and this device is syncing to it.</div>
+        <table class="tbl"><tbody>
+          <tr><td style="width:110px;font-size:12px">Gist ID</td><td><code style="user-select:all">${esc(c.gist)}</code></td></tr>
+          <tr><td style="font-size:12px">Token ends in</td><td><code style="user-select:all">${esc(tokenTail(c.token))}</code></td></tr>
+        </tbody></table>
+        <div class="mini-note" style="margin-top:10px">Easiest way to set up the phone: copy the setup code below, email it to yourself, open the hub on the phone, press Sync and paste it into the setup code box.</div>`;
+      document.getElementById('m-foot').innerHTML=`
+        <button class="btn" onclick="closeModal()">Close</button>
+        <button class="btn primary" onclick="copySetupCode()">📋 Copy setup code</button>`;
+      document.getElementById('modal-back').classList.add('open');
       _syncing=false; if(btn) btn.style.opacity='1'; return;
     }
     const rEdit=remote._lastEdit||0, lEdit=local._lastEdit||0;
+    /* both sides changed since the last sync: never overwrite silently */
+    const since=c.lastSync||0;
+    if(since && rEdit>since && lEdit>since && rEdit!==lEdit){
+      _syncing=false; if(btn) btn.style.opacity='1';
+      await makeBackup('before conflict resolve');
+      const rc=remote.contacts?remote.contacts.length:'?', rs=remote.seminars?remote.seminars.length:'?';
+      const lc=(S.contacts||[]).length, ls=(S.seminars||[]).length;
+      document.getElementById('m-title').textContent='Both devices changed since the last sync';
+      document.getElementById('m-body').innerHTML=`
+        <div class="mini-note" style="margin-bottom:11px;line-height:1.7">Work was done here <b>and</b> on your other device since ${fmtDateTime(since)}. Sync replaces everything rather than merging, so one side has to win. A restore point was saved first, so nothing is lost for good.</div>
+        <table class="tbl"><thead><tr><th>Version</th><th>Last edited</th><th>Contacts</th><th>Seminars</th></tr></thead><tbody>
+          <tr><td><b>This device</b></td><td>${fmtDateTime(lEdit)}</td><td>${lc}</td><td>${ls}</td></tr>
+          <tr><td><b>The cloud copy</b></td><td>${fmtDateTime(rEdit)}</td><td>${rc}</td><td>${rs}</td></tr>
+        </tbody></table>
+        <div class="mini-note" style="margin-top:9px">Pick the one with the work you care about. If unsure, keep this device, press <b>⬇ Backup</b>, then sync again and take the cloud copy: you can compare the two files afterwards.</div>`;
+      document.getElementById('m-foot').innerHTML=`
+        <button class="btn" onclick="closeModal()">Decide later</button>
+        <button class="btn navy" onclick="closeModal();resolveSync('remote')">Take the cloud copy</button>
+        <button class="btn primary" onclick="closeModal();resolveSync('local')">Keep this device</button>`;
+      document.getElementById('modal-back').classList.add('open');
+      _pendingRemote=remote;
+      return;
+    }
     if(rEdit>lEdit){
       await applySnapshot(remote);
       c.lastSync=Date.now(); saveSyncCfg(c);
