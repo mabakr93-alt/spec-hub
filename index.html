@@ -1055,6 +1055,11 @@ function renderDash(){
           <button class="btn sm" onclick="openChangeLog()">Open change log</button>
         </div>
       </div>
+      <div style="margin-top:5px;font-size:12.5px">
+        <b>${S.tasks.filter(t=>t[TF.STATUS]!=='Completed').length} open tasks</b>
+        <span class="cell-sub">· today ${dueSoonTasks().today.length}${(dueSoonTasks().late12.length+dueSoonTasks().lateOld.length)?' · <span class="due-late">late '+(dueSoonTasks().late12.length+dueSoonTasks().lateOld.length)+'</span>':''}
+        · ${S.contacts.length} contacts · ${S.seminars.length} seminars · ${S.tracking.length} tracking · ${S.projects.length} projects</span>
+      </div>
       <div class="cell-sub" style="margin-top:4px">${last?`Last: <b>${esc(last.x)}</b> · ${fmtDateTime(last.t)}`:'No changes recorded yet.'}
       ${syncCfg().lastSync?` · last sync ${fmtDateTime(syncCfg().lastSync)}`:(syncCfg().token?' · never synced':' · sync not set up, this device only')}</div>
     </div>`;})()}
@@ -2710,7 +2715,15 @@ async function saveNow(){
   logChange('Manual save of every tab', 'Saved');
   setSaveDot(storageOK?'ok':'off', storageOK?'Saved':'Session only');
   const n=dataCounts();
-  toast('Saved at '+new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})+' — '+n.contacts+' contacts · '+n.seminars+' seminars ('+n.sbuFilled+' with SBU) · '+n.tracking+' tracking · '+n.projects+' projects');
+  const open=S.tasks.filter(t=>t[TF.STATUS]!=='Completed').length;
+  const done=S.tasks.filter(t=>t[TF.STATUS]==='Completed').length;
+  const g=dueSoonTasks();
+  const late=g.late12.length+g.lateOld.length;
+  const t=new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+  toast('Saved '+t+' — OPEN TASKS '+open
+      +' (today '+g.today.length+(late?', late '+late:'')+')'
+      +' · done '+done
+      +' · '+n.contacts+' contacts · '+n.seminars+' seminars · '+n.tracking+' tracking · '+n.projects+' projects');
   renderDash();
 }
 function stampNow(){
