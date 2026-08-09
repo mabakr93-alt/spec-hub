@@ -932,6 +932,37 @@ function kpiSet(key, field, v){
 }
 
 /* ================= DASHBOARD ================= */
+function potentialSbus(){
+  const out=[];
+  S.vendors.forEach(v=>BU_KEYS.forEach(k=>{
+    const b=v[VF.BUS] && v[VF.BUS][k];
+    if(!b) return;
+    if(sbuVL(b) || sbuDR(b)) return;                       /* already registered */
+    const st=sbuStage(b);
+    if(st==='Not Started' || !st) return;                  /* nothing happening yet */
+    out.push({co:v[VF.COMPANY], sbu:BU_LABELS[k].replace('Hanger & Support','H&S'), stage:st,
+              cls:classOf(v[VF.TYPE], v[VF.PRIO])});
+  }));
+  const rank={'In the Drawings':0,'Waiting for a Response':1,'In Progress':2,'Potential':3};
+  return out.sort((a,b)=>(rank[a.stage]??9)-(rank[b.stage]??9) || a.co.localeCompare(b.co));
+}
+function togglePanel(key){
+  S.meta.panels = S.meta.panels || {};
+  S.meta.panels[key] = !S.meta.panels[key];
+  save('meta'); renderDash();
+}
+function panelOpen(key){ return !!(S.meta && S.meta.panels && S.meta.panels[key]); }
+function collapsible(key, title, count, bodyHtml, accent){
+  const open=panelOpen(key);
+  return `<div class="card" style="padding:12px 15px;margin-bottom:12px;border-left:4px solid ${accent||'var(--navy)'}">
+    <div style="display:flex;align-items:center;gap:9px;cursor:pointer" onclick="togglePanel('${key}')">
+      <div style="font-weight:800;font-size:13px;flex:1">${title}</div>
+      <span class="pill p-grey">${count}</span>
+      <span style="font-size:12px;color:var(--muted)">${open?'▲ hide':'▼ show'}</span>
+    </div>
+    ${open?`<div style="margin-top:10px">${bodyHtml}</div>`:''}
+  </div>`;
+}
 function namesBlock(title, items, pill){
   if(!items.length) return `<div style="margin-bottom:9px"><div class="doc-sec"><h3>${esc(title)} — 0</h3><div class="cell-sub">none</div></div></div>`;
   return `<div class="doc-sec" style="margin-bottom:12px"><h3>${esc(title)} — ${items.length}</h3>
@@ -971,36 +1002,34 @@ function renderDash(){
     <div class="kpi accent"><div class="k-label">Registrations ${y||''} — main KPI</div><div class="k-val">${K.total}</div>
       <div class="k-note">SBU registrations: <b>${K.sbu}</b> · Online portals: <b>${K.portals}</b></div>
       <div class="k-note">A:${K.byClass.A} · B:${K.byClass.B} · C:${K.byClass.C} · Auth:${K.byClass.Auth} · Dev:${K.byClass.Dev} · each counted once</div></div>
-    <div class="kpi" title="One line per business unit, not per company. A company listed for 4 SBUs counts 4."><div class="k-label">SBU registrations ${y||''}</div><div class="k-val">${K.sbu}</div>
-      <div class="k-note">In the vendor list: <b>${K.vl}</b> · In the drawings only: <b>${K.drOnly}</b></div>
-      <div class="k-note">across ${new Set(sbuLines(y).map(l=>l.co)).size} compan${new Set(sbuLines(y).map(l=>l.co)).size===1?'y':'ies'}</div></div>
     <div class="kpi"><div class="k-label">Seminars ${yLabel}</div><div class="k-val">${kpiSeminars(y)}</div><div class="k-note">from Seminar log (${S.seminars.length} total)</div></div>
     <div class="kpi" style="cursor:pointer" onclick="openFixBreakdown()" title="See exactly which contacts make up this number"><div class="k-label">FiXperience ${yLabel}</div><div class="k-val">${kpiFix(y)}</div><div class="k-note">installations · click to see the list</div></div>
     <div class="kpi" style="opacity:.85"><div class="k-label">Companies with fischer listed</div><div class="k-val">${vs.total}</div>
       <div class="k-note">secondary statistic · vendor list ${vs.list} · drawings only ${vs.draw}</div></div>
     <div class="kpi"><div class="k-label">Sales Leads</div><div class="k-val">${flaggedLeads(y).length}</div><div class="k-note">${y?y+' projects flagged for slides':'all flagged for slides'}</div></div>
     <div class="kpi"><div class="k-label">Pipeline Expected</div><div class="k-val" style="font-size:19px;padding-top:6px">${kpiHidden()?'•••':fmtSAR(pt.exp)}</div><div class="k-note">Invoiced: ${kpiHidden()?'•••':fmtSAR(pt.inv)}</div></div>
-    <div class="kpi"><div class="k-label">Online portals ${y||''}</div><div class="k-val">${onl.length}<span style="font-size:14px;color:var(--muted)">/${S.onlinereg.length}</span></div><div class="k-note">registered${onlNoDate.length&&y?` · ${onlNoDate.length} undated, only in All time`:''}</div></div>
+
     <div class="kpi"><div class="k-label">Open Tasks</div><div class="k-val">${openT.length}</div><div class="k-note">${overdue.length? `<span class="due-late">${overdue.length} overdue</span>`:'none overdue'}</div></div>
   </div>
 
-  <div class="card" style="padding:13px 16px;margin-bottom:14px">
-    <div class="section-h" style="margin:0 0 ${FLT.dash.names?'11px':'0'}">
-      <h2>Who is counted${y?' in '+y:''} — ${K.total}</h2>
-      <div class="right"><button class="chip ${FLT.dash.names?'on':''}" onclick="FLT.dash.names=!FLT.dash.names;renderDash()">${FLT.dash.names?'▲ Collapse names':'▼ Show company names'}</button></div>
-    </div>
-    ${FLT.dash.names?`
+  ${collapsible('reg','Vendor registrations '+(y||'all time'), K.total, `
       ${namesBlock('SBU registrations by class', sbuLines(y).map(l=>({n:l.co+' — '+l.sbu, t:l.cls+(l.vl?' · VL '+fmtDate(l.vl):'')+(l.dr?' · DR '+fmtDate(l.dr):'')})), 'p-grey')}
       ${namesBlock('Online portals registered', onl.map(r=>({n:r[RF.COMPANY], t:classOf(r[RF.TYPE],r[RF.PRIO])+' · '+(r[RF.DATE]?fmtDate(r[RF.DATE]):(r[RF.VID]?'ID '+r[RF.VID]:'no date on file'))})), 'p-teal')}
-      ${namesBlock('Companies with fischer listed (secondary)', registeredVendors(y).map(v=>({n:v[VF.COMPANY], t:classOf(v[VF.TYPE],v[VF.PRIO])+' · '+[...vendorSbuTags(v,'vl',y),...vendorSbuTags(v,'dr',y)].join(' · ')})), 'p-green')}
-    `:''}
-  </div>
-  ${onlNoDate.length?`<div class="card" style="padding:11px 15px;margin-bottom:14px;border-left:4px solid var(--amber)">
-    <div style="font-size:12.5px;font-weight:700;margin-bottom:3px">${onlNoDate.length} registered portal(s) have no approval date, so they only count in All time</div>
-    <div class="cell-sub">${onlNoDate.map(r=>esc(r[RF.COMPANY])).join(' · ')}</div>
-    <div class="mini-note" style="margin-top:4px">Add the approval date in Vendor Lists to include them in the year figures.</div></div>`:''}
+      ${namesBlock('Companies with fischer listed', registeredVendors(y).map(v=>({n:v[VF.COMPANY], t:classOf(v[VF.TYPE],v[VF.PRIO])+' · '+[...vendorSbuTags(v,'vl',y),...vendorSbuTags(v,'dr',y)].join(' · ')})), 'p-green')}
+    `, 'var(--green)')}
+
+  ${(()=>{const P=potentialSbus();
+    const byStage={};
+    P.forEach(p=>{ (byStage[p.stage]=byStage[p.stage]||[]).push(p); });
+    const body = P.length===0
+      ? '<div class="cell-sub">Nothing in progress. Set an SBU stage in Vendor Lists to track it here.</div>'
+      : Object.keys(byStage).map(st=>namesBlock(st, byStage[st].map(p=>({n:p.co+' — '+p.sbu, t:p.cls})),
+          st==='In the Drawings'?'p-blue':(st==='Waiting for a Response'?'p-orange':(st==='In Progress'?'p-amber':'p-teal')))).join('');
+    return collapsible('pot','Potential vendor approvals', P.length, body+'<div class="mini-note" style="margin-top:6px">SBUs being worked on that carry no vendor-list or in-drawings date yet. They are not counted in the KPI above.</div>', 'var(--amber)');
+  })()}
+  
   ${renderTargets(y || curYear())}
-  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px">
+  ${collapsible('charts','Breakdown charts', BU_KEYS.length+5, `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px">
     <div class="card" style="padding:15px 17px">
       <div class="section-h" style="margin:0 0 10px"><h2>Main KPI by class</h2><span class="hint">${y?y+' · ':''}SBU registrations + online portals</span></div>
       ${CLS.map(([k,lab])=>`
@@ -1036,7 +1065,7 @@ function renderDash(){
           <div class="${t[TF.DUE]<today()?'due-late':''}" style="font-size:11.5px;white-space:nowrap">${fmtDate(t[TF.DUE])}</div>
         </div>`).join('')}
     </div>
-  </div>
+  </div>`, 'var(--navy)')}
 
   ${(()=>{ const fresh=!(S.meta.log||[]).length && !syncCfg().token;
      return fresh ? `<div class="card" style="padding:12px 16px;margin-top:14px;border-left:4px solid var(--red)">
@@ -1325,12 +1354,27 @@ function renderContacts(){
           ${(+c[CF.NFIX]||0)>0?`<input type="date" value="${esc(String(c[CF.FIXDATE]||'').slice(0,10))}" style="margin-top:3px;font-size:10.5px;padding:2px 4px;${String(c[CF.FIXDATE]||'').trim()?'':'border-color:var(--red)'}" title="Installation date, decides which year it counts in" onchange="setContactField(${c[CF.ID]},${CF.FIXDATE},this.value)">`:''}</td>
         <td>${c[CF.LEAD]?`<span class="pill ${c[CF.LEAD]==='Yes'?'p-green':'p-amber'}">${esc(c[CF.LEAD])}</span>`:''}</td>
         <td class="row-actions">
+          ${c[CF.EMAIL]?`<button class="icon-btn" onclick="emailContact(${c[CF.ID]})" title="Email ${esc(c[CF.NAME]||c[CF.COMPANY])}">✉</button>`:''}
+          ${c[CF.MOBILE]&&waLink(c[CF.MOBILE])?extLinkBtn(waLink(c[CF.MOBILE]),'WA','WhatsApp '+(c[CF.NAME]||''),'padding:2px 7px;background:#25D366;color:#fff;border-color:#25D366',c[CF.MOBILE]):''}
           <button class="icon-btn" onclick="pushContactToTracking(${c[CF.ID]})" title="Add this contact to Team Tracking"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12h12M12 6l6 6-6 6"/></svg></button>
           <button class="icon-btn" onclick="openContactForm(${c[CF.ID]})" title="Edit"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20h4L19 9a2.1 2.1 0 00-3-3L5 17l-1 3z"/></svg></button>
           <button class="icon-btn" onclick="delRow('contacts',${c[CF.ID]},renderContacts)" title="Delete"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M9 7V5h6v2m-8 0l1 13h8l1-13"/></svg></button>
         </td>
       </tr>`).join('') || '<tr><td colspan="8"><div class="empty">No contacts match.</div></td></tr>'}
     </tbody></table></div>`;
+}
+function emailContact(id){
+  const c=S.contacts.find(x=>x[CF.ID]===id);
+  if(!c || !String(c[CF.EMAIL]||'').includes('@')){ toast('No email on this contact', true); return; }
+  const first=String(c[CF.NAME]||'').split(' ')[0]||'';
+  const body=[
+    'Dear '+(first||'Sir'),'',
+    (c[CF.SEMDATE] ? 'Thank you for attending our '+(c[CF.SEMSBU]?c[CF.SEMSBU]+' ':'')+'seminar on '+fmtDate(c[CF.SEMDATE])+'.'
+                   : 'It was a pleasure being in contact with '+(c[CF.COMPANY]||'your office')+'.'),
+    '','Please find below what we discussed, and let me know if you would like the technical documentation or a design session using our FiXperience software.','',
+    'Best regards,','Mohamed Bakr','Sr. Specification Engineer, fischer Saudi Arabia'
+  ].join('\n');
+  openEmailDraft(c[CF.EMAIL], 'fischer | '+(c[CF.COMPANY]||'Follow-up'), body, 'Email '+(c[CF.NAME]||c[CF.COMPANY]));
 }
 function setContactField(id, field, val){
   const c=S.contacts.find(x=>x[CF.ID]===id);
@@ -1961,6 +2005,7 @@ function renderTracking(){
         <td>${k[KF.CONTACTS].length?`<span class="pill p-grey">${k[KF.CONTACTS].length} 👤</span>`:''}</td>
         <td class="row-actions">
           ${k[KF.NEW]?`<button class="btn sm primary" style="padding:2px 8px" onclick="confirmTracking(${k[KF.ID]})" title="Record completed, clear the red">✓</button>`:''}
+          ${(k[KF.CONTACTS]||[]).some(c=>String(c[2]||'').includes('@'))?`<button class="icon-btn" onclick="emailTrackingContacts(${k[KF.ID]})" title="Email everyone listed at ${esc(k[KF.CONS])}">✉</button>`:''}
           <button class="icon-btn" onclick="openTrackForm(${k[KF.ID]})" title="Edit full record"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20h4L19 9a2.1 2.1 0 00-3-3L5 17l-1 3z"/></svg></button>
           <button class="icon-btn" onclick="delRow('tracking',${k[KF.ID]},renderTracking)" title="Delete"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M9 7V5h6v2m-8 0l1 13h8l1-13"/></svg></button>
         </td>
@@ -1971,6 +2016,22 @@ function cycleBU(id, bi){
   const k = S.tracking.find(x=>x[KF.ID]===id);
   k[KF.BUS][bi][1] = String((+k[KF.BUS][bi][1]+1) % 5);
   save('tracking'); keepScroll(renderTracking);
+}
+function emailTrackingContacts(id){
+  const k=S.tracking.find(x=>x[KF.ID]===id);
+  if(!k) return;
+  const to=(k[KF.CONTACTS]||[]).map(c=>String(c[2]||'').trim()).filter(e=>e.includes('@'));
+  if(!to.length){ toast('No email addresses saved on '+k[KF.CONS], true); return; }
+  const names=(k[KF.CONTACTS]||[]).filter(c=>String(c[2]||'').includes('@')).map(c=>c[0]).filter(Boolean);
+  const bus=(k[KF.BUS]||[]).map(b=>b[0]).filter(Boolean).join(', ');
+  const body=[
+    'Dear '+(names.length===1?String(names[0]).split(' ')[0]:'all')+',','',
+    'Following up on our work with '+k[KF.CONS]+'.','',
+    bus?('Business units in discussion: '+bus):'',
+    '','Please let me know a convenient time to present the relevant fischer systems and share the supporting documentation.','',
+    'Best regards,','Mohamed Bakr','Sr. Specification Engineer, fischer Saudi Arabia'
+  ].filter(x=>x!==undefined).join('\n');
+  openEmailDraft(to.join('; '), 'fischer | '+k[KF.CONS], body, 'Email the contacts at '+k[KF.CONS]);
 }
 function trackBURowHTML(b){
   return `<div style="display:grid;grid-template-columns:1.3fr 1.6fr repeat(3,60px) 30px;gap:6px;margin-bottom:6px;align-items:center" data-bu="x">
@@ -2974,6 +3035,7 @@ function renderTasks(){
     <button class="chip ${f.hideComments?'on':''}" onclick="FLT.tasks.hideComments=!FLT.tasks.hideComments;renderTasks()">Hide comments</button>
     <button class="chip ${(S.meta&&S.meta.hideFollowupBucket)?'on':''}" onclick="S.meta.hideFollowupBucket=!(S.meta&&S.meta.hideFollowupBucket);save('meta');renderTasks()">Hide follow-up bucket</button>
     <span class="count-note">drag to move or reorder · circle = advance status</span>
+    <button class="btn sm" onclick="emailTaskSelection()" title="Email the tasks currently shown">✉ Email these tasks</button>
     <button class="btn sm" onclick="exportSheet('tasks')">Export sheet</button>
     <button class="btn primary sm" onclick="openTaskForm()">+ Add task</button>
   </div>
@@ -3040,7 +3102,7 @@ function renderTasks(){
           <div class="t-meta">
             ${taskLabels(t).map(labelChip).join('')}
             ${t[TF.STATUS]==='In progress'?'<span class="pill p-blue">In progress</span>':''}
-            ${t[TF.STATUS]==='Completed'&&t[TF.DONE]?`<span>✓ ${fmtDate(t[TF.DONE])}</span>`:(t[TF.DUE]?`<span class="${t[TF.DUE]<today()&&t[TF.STATUS]!=='Completed'?'due-late':''}">📅 ${fmtDate(t[TF.DUE])}${t[TF.TIME]?' ⏰ '+esc(t[TF.TIME]):''}</span>`:'')}
+            ${t[TF.STATUS]==='Completed'&&t[TF.DONE]?`<span>✓ ${fmtDate(t[TF.DONE])}</span>`:(t[TF.DUE]?`<span class="${t[TF.DUE]<today()&&t[TF.STATUS]!=='Completed'?'due-late':''}">📅 ${fmtDate(t[TF.DUE])}${t[TF.TIME]?` ⏰ <span onclick="event.stopPropagation();clearTaskTime(${t[TF.ID]})" title="Remove this alarm" style="cursor:pointer;text-decoration:underline dotted">${esc(t[TF.TIME])} ✕</span>`:''}</span>`:'')}
             ${t[TF.PRIO]&&t[TF.PRIO]!=='Medium'?`<span class="pill ${t[TF.PRIO]==='Urgent'?'p-red':t[TF.PRIO]==='Important'?'p-orange':'p-grey'}">${esc(t[TF.PRIO])}</span>`:''}
             ${t[TF.REPEAT]?`<span class="pill p-navy" title="Repeats: ${esc(t[TF.REPEAT])}">🔁 ${esc(t[TF.REPEAT])}</span>`:''}
             ${f.hideComments && t[TF.COMMENTS] ? '💬' : ''}
@@ -3049,6 +3111,26 @@ function renderTasks(){
         </div>`).join('') || '<div class="empty" style="padding:12px;font-size:12px">Drop tasks here</div>'}
       </div>`;}).join('')}
   </div>`;
+}
+function emailTaskSelection(){
+  const f=FLT.tasks;
+  let rows=S.tasks.filter(t=>t[TF.STATUS]!=='Completed');
+  if(f.label) rows=rows.filter(t=>taskLabels(t).includes(f.label));
+  if(f.q){ const q=f.q.toLowerCase(); rows=rows.filter(t=>(t[TF.NAME]+' '+t[TF.COMMENTS]+' '+(t[TF.LABELS]||'')).toLowerCase().includes(q)); }
+  if(!rows.length){ toast('Nothing matches the current view', true); return; }
+  rows.sort((a,b)=>(a[TF.DUE]||'9999')<(b[TF.DUE]||'9999')?-1:1);
+  const byBucket={};
+  rows.forEach(t=>{ (byBucket[t[TF.BUCKET]]=byBucket[t[TF.BUCKET]]||[]).push(t); });
+  const body=[
+    'Task list from fischer Spec Hub, '+fmtDate(today()),
+    f.label?('Label: '+f.label):'', f.q?('Search: '+f.q):'', '',
+    ...Object.keys(byBucket).map(b=>b.toUpperCase()+':\n'+byBucket[b].map(t=>
+      '- '+t[TF.NAME]+(t[TF.DUE]?'  (due '+fmtDate(t[TF.DUE])+(t[TF.TIME]?' '+t[TF.TIME]:'')+')':'')
+      +(t[TF.PRIO]&&t[TF.PRIO]!=='Medium'?'  ['+t[TF.PRIO]+']':'')
+      +(t[TF.COMMENTS]?'\n    '+String(t[TF.COMMENTS]).replace(/\n/g,'\n    '):'')
+    ).join('\n')),
+  ].filter(x=>x!=='').join('\n\n');
+  openEmailDraft(REMIND_EMAIL, 'fischer | '+rows.length+' task(s)'+(f.label?' — '+f.label:''), body, 'Email '+rows.length+' task(s)');
 }
 function dragTask(ev, id){
   ev.dataTransfer.setData('text/plain', String(id));
@@ -3208,10 +3290,10 @@ function openTaskForm(id, presetBucket){
     {k:TF.STATUS,label:'Status',type:'select',opts:['Not started','In progress','Completed']},
     {k:TF.PRIO,label:'Priority',type:'select',opts:['Low','Medium','Important','Urgent']},
     {k:TF.DUE,label:'Due date',type:'date'},
-    {k:TF.TIME,label:'Remind me at (time)',type:'time'},
+    {k:TF.TIME,label:'Remind me at (time) — leave empty for no alarm',type:'time'},
     {k:TF.REPEAT,label:'Repeat (like Planner)',type:'select',opts:REPEAT_OPTS},
     {k:TF.LABELS,label:'Labels (tap to toggle)',type:'labels',full:1},
-    {k:TF.COMMENTS,label:'Comments / notes',type:'textarea',full:1},
+    {k:TF.COMMENTS,label:'Comments / notes',type:'comments',full:1},
   ], tpl, vals=>{
     if(!String(vals[TF.NAME]||'').trim()){ toast('Task name is required — nothing was saved', true); return; }
     let target; const prev = t ? t[TF.STATUS] : 'Not started';
@@ -3238,7 +3320,16 @@ function openForm(title, fields, rec, onSave, extraFoot){
   document.getElementById('m-body').innerHTML=`<div class="f-grid">${fields.map(f=>{
     const val = rec ? rec[f.k] : (f.type==='number'?0:'');
     let inp;
-    if(f.type==='labels'){
+    if(f.type==='comments'){
+      inp=`<div data-k="${f.k}" data-type="comments">
+        <textarea class="cm-box" dir="auto" style="min-height:90px">${esc(val)}</textarea>
+        <div style="display:flex;gap:6px;margin-top:6px">
+          <input class="cm-new" placeholder="Add a dated note…" style="flex:1" onkeydown="if(event.key==='Enter'){event.preventDefault();addDatedNote(this);}">
+          <button type="button" class="btn sm primary" onclick="addDatedNote(this.previousElementSibling)">+ Add dated note</button>
+        </div>
+        <div class="mini-note" style="margin-top:4px">Each note is stamped with today's date so a long history stays readable.</div>
+      </div>`;
+    } else if(f.type==='labels'){
       const cur=String(val||'').split(';').map(x=>x.trim()).filter(Boolean);
       const known=[...new Set([...allTaskLabels(), ...cur])];
       inp=`<div data-k="${f.k}" data-type="labels">
@@ -3257,6 +3348,11 @@ function openForm(title, fields, rec, onSave, extraFoot){
   document.getElementById('m-save').onclick=()=>{
     const vals={};
     document.querySelectorAll('#m-body [data-k]').forEach(el=>{
+      if(el.type==='time'){ vals[el.dataset.k]=el.value||''; return; }
+      if(el.dataset.type==='comments'){
+        vals[el.dataset.k]=el.querySelector('.cm-box').value.trim();
+        return;
+      }
       if(el.dataset.type==='labels'){
         const on=[...el.querySelectorAll('.lbl-tog.on')].map(b=>b.dataset.lbl);
         const nw=el.querySelector('.lbl-new'); if(nw && nw.value.trim()) on.push(...nw.value.split(';').map(x=>x.trim()).filter(Boolean));
@@ -3268,6 +3364,16 @@ function openForm(title, fields, rec, onSave, extraFoot){
     closeModal(); onSave(vals);
   };
   document.getElementById('modal-back').classList.add('open');
+}
+function addDatedNote(inp){
+  const box=inp.closest('[data-type="comments"]').querySelector('.cm-box');
+  const txt=String(inp.value||'').trim();
+  if(!txt){ inp.focus(); return; }
+  const line='['+fmtDate(today())+'] '+txt;
+  box.value = box.value.trim() ? box.value.trim()+'\n'+line : line;
+  inp.value='';
+  box.scrollTop=box.scrollHeight;
+  inp.focus();
 }
 function closeModal(){ document.getElementById('modal-back').classList.remove('open'); }
 /* clicking the dim area no longer closes the form: too easy to lose typed data.
@@ -3762,28 +3868,37 @@ function seminarsAOA(){
 }
 const TRACK_MAIN_BUS=['Fixings','Firestop','MEP','Façade'];
 function trackingAOA(){
-  const h=['S.No','Consultant','Priority','Type of Specifier','Handled By','BU','Status','Status Meaning','Seminar','Documentation','FiXperience','Contact Name','Contact Mobile','Contact Email','Portal Website','Portal Username','Portal Password','Notes','New Since'];
-  const out=[h];
+  /* mirrors the shared team file exactly: legend row, two header rows,
+     BU · Status · Seminar · Documentation submission · Fixperience,
+     then two contact blocks, portal details and notes */
+  const out=[];
+  out.push(['0','New','1','Contact generated','2','First Meeting Done','3','In the Vendor list','4','Specific/Master Specification','','','','','','','','','','','']);
+  out.push(['S.No','Consultant','Priority','Type of Specifier','Handled By','BU','Status','Seminar','Documentation submission','Fixperience','Contact','','','','','','Portal Details','','','Notes','New Since']);
+  out.push(['','','','','','','','','','','Name-1','Mobile','Email','Name-2','Mobile','Email','Website','User Name','Password','','']);
   S.tracking.forEach(k=>{
-    /* every consultant shows the four main business units, even when nothing is set */
     const bus=[...(k[KF.BUS]||[])];
     TRACK_MAIN_BUS.forEach(name=>{
-      if(!bus.some(b=>String(b[0]).trim().toLowerCase()===name.toLowerCase()))
-        bus.push([name,'0','No','No','No']);
+      if(!bus.some(b=>String(b[0]).trim().toLowerCase()===name.toLowerCase())) bus.push([name,'0','No','No','No']);
     });
     bus.sort((a,b)=>{
       const ia=TRACK_MAIN_BUS.findIndex(x=>x.toLowerCase()===String(a[0]).toLowerCase());
       const ib=TRACK_MAIN_BUS.findIndex(x=>x.toLowerCase()===String(b[0]).toLowerCase());
       return (ia<0?9:ia)-(ib<0?9:ib);
     });
-    const nRows=Math.max(bus.length, k[KF.CONTACTS].length, 1);
+    const c1=k[KF.CONTACTS][0]||['','',''], c2=k[KF.CONTACTS][1]||['','',''];
+    const extra=k[KF.CONTACTS].slice(2);
+    const nRows=Math.max(bus.length, 1+extra.length, 1);
     for(let i=0;i<nRows;i++){
-      const b=bus[i]||['','','','',''], c=k[KF.CONTACTS][i]||['','',''];
+      const b=bus[i]||['','','','',''];
+      /* contacts 3+ continue down the Name-2 block so nothing is lost */
+      const e=i>0 ? (extra[i-1]||['','','']) : null;
       out.push([
         i===0?k[KF.ID]:'', i===0?k[KF.CONS]:'', i===0?k[KF.PRIO]:'', i===0?k[KF.TYPE]:'', i===0?k[KF.HANDLER]:'',
-        b[0], b[0]||b[1]?b[1]:'', b[0]||b[1]?(TRACK_STATUS[+b[1]||0]||''):'', b[0]?b[2]:'', b[0]?b[3]:'', b[0]?b[4]:'',
-        c[0], c[1], c[2],
-        i===0?k[KF.PORTAL][0]:'', i===0?k[KF.PORTAL][1]:'', i===0?k[KF.PORTAL][2]:'', i===0?k[KF.NOTES]:'', i===0?(k[KF.NEW]||''):''
+        b[0]||'', b[0]?(b[1]||'0'):'', b[0]?(b[2]||'No'):'', b[0]?(b[3]||'No'):'', b[0]?(b[4]||'No'):'',
+        i===0?c1[0]:'', i===0?c1[1]:'', i===0?c1[2]:'',
+        i===0?c2[0]:(e?e[0]:''), i===0?c2[1]:(e?e[1]:''), i===0?c2[2]:(e?e[2]:''),
+        i===0?k[KF.PORTAL][0]:'', i===0?k[KF.PORTAL][1]:'', i===0?k[KF.PORTAL][2]:'',
+        i===0?k[KF.NOTES]:'', i===0?(k[KF.NEW]||''):''
       ]);
     }
   });
@@ -3822,7 +3937,7 @@ function teamAOA(){
 const SHEET_DEFS = {
   contacts:  {name:'Contact List', fn:contactsAOA,  w:[8,30,26,24,18,32,30,12,22,10,10,14,10,34]},
   seminars:  {name:'Seminars',     fn:seminarsAOA,  w:[6,13,34,48,24,12]},
-  tracking:  {name:'Team Tracking',fn:trackingAOA,  w:[6,32,7,15,18,16,7,24,9,9,9,18,16,28,20,18,16,30,12]},
+  tracking:  {name:'Tracking',      fn:trackingAOA,  w:[6,32,7,16,18,15,7,9,20,11,16,14,26,16,14,26,18,16,14,26,12]},
   projects:  {name:'Projects',     fn:projectsAOA,  w:[6,18,26,20,30,16,12,12,30,26,16,9,10,18,34,24,18,14,7,26,24,10]},
   vendors:   {name:'Vendor List',  fn:vendorsAOA,   w:[32,12,7,18,22,16,30, 16,15,15, 16,15,15, 16,15,15, 16,15,15, 16,15,15]},
   onlinereg: {name:'Online Registrations', fn:onlineregAOA, w:[26,16,14,8,30,18,18,12,18,32]},
@@ -3918,6 +4033,7 @@ const IMPORTERS = {
       tp>=0?(r[tp]||''):guessTopic(r[n], b>=0?r[b]:''), pa>=0?(+String(r[pa]).replace(/\D/g,'')||randPax()):randPax()]); });
     return out;
   }},
+  'Tracking ': {key:'tracking', label:'Team Tracking', parse(rows){ return IMPORTERS['Tracking'].parse(rows); }},
   'Team Tracking': {key:'tracking', label:'Team Tracking (hub format)', parse(rows){
     const h=rows[0];
     const ci={sn:colIdx(h,'s.no'),co:colIdx(h,'consultant'),pr:colIdx(h,'priority'),ty:colIdx(h,'type of specifier','type'),ha:colIdx(h,'handled by'),bu:colIdx(h,'bu'),st:colIdx(h,'status'),se:colIdx(h,'seminar'),doc:colIdx(h,'documentation'),fx:colIdx(h,'fixperience'),cn:colIdx(h,'contact name'),cm:colIdx(h,'contact mobile'),ce:colIdx(h,'contact email'),pw:colIdx(h,'portal website'),pu:colIdx(h,'portal username'),pp:colIdx(h,'portal password'),no:colIdx(h,'notes')};
@@ -3942,7 +4058,7 @@ const IMPORTERS = {
       const g=i=>r[i]||'';
       if(g(1)){
         if(cur) out.push(cur);
-        cur=[out.length+1, g(1), g(2), g(3), g(4), [], [], [g(16),g(17),g(18)], g(19), ''];
+        cur=[out.length+1, g(1), g(2), g(3), g(4), [], [], [g(16),g(17),g(18)], g(19), g(20)||''];
       }
       if(!cur) return;
       if(g(5)||g(6)) cur[5].push([normTrackBU(g(5)), statusToNum(g(6)), g(7)||'No', g(8)||'No', g(9)||'No']);
@@ -4093,6 +4209,15 @@ function fireAlarm(t){
   S.meta.fired[t[TF.ID]] = today()+'T'+(t[TF.TIME]||'');
   save('meta');
   logChange('Alarm fired: '+t[TF.NAME], 'Tasks');
+}
+function clearTaskTime(id){
+  const t=S.tasks.find(x=>x[TF.ID]===id);
+  if(!t) return;
+  t[TF.TIME]='';
+  if(S.meta.fired) delete S.meta.fired[id];
+  save('tasks'); save('meta'); keepScroll(renderTasks);
+  toast('Alarm removed from “'+String(t[TF.NAME]).slice(0,30)+'”');
+  logChange('Alarm removed: '+t[TF.NAME], 'Tasks');
 }
 function snoozeAlarm(id, mins){
   const t=S.tasks.find(x=>x[TF.ID]===id);
