@@ -875,13 +875,7 @@ function kpiEvidence(key, y){
         .map(l=>({n:l.co+' — '+l.sbu, t:(l.vl?'vendor list '+fmtDate(l.vl):'in drawings '+fmtDate(l.dr))}));
   const portals=()=>onlineRegistered(y).map(r=>({n:r[RF.COMPANY]+' (online portal)', t:r[RF.DATE]?fmtDate(r[RF.DATE]):'no date'}));
   switch(key){
-    case 'turnover': {
-      const mine=live.filter(p=>(+p[PF.INVVAL]||0)>0)
-        .sort((a,b)=>(+b[PF.INVVAL]||0)-(+a[PF.INVVAL]||0))
-        .map(p=>({n:p[PF.PROJ]||'(no name)', t:fmtSAR(+p[PF.INVVAL]||0)+(p[PF.CONS]?' · '+p[PF.CONS]:'')}));
-      const tot=mine.reduce((s,p)=>s+0,0);
-      return [{n:'Country turnover is entered by hand', t:'the list below is only your own invoiced projects, for reference'}, ...mine];
-    }
+    case 'turnover': return [];   /* a country figure, no project records behind it */
     case 'vlA': return [...sbuOf('A'), ...sbuOf('Auth'), ...sbuOf('Dev'), ...portals()];
     case 'vlB': return sbuOf('B');
     case 'vlC': return sbuOf('C');
