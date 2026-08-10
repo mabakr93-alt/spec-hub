@@ -305,6 +305,11 @@ select.cell-sel:hover{border-color:var(--line);background:#fff}
 .tcol h3[draggable]:active{cursor:grabbing}
 .board.stacked{display:block;overflow-x:visible}
 .board.stacked .tcol{width:auto;max-width:820px;margin:0 0 14px;flex:none}
+.note-card{border:1px solid var(--line);border-radius:9px;padding:8px 10px;margin-bottom:7px;background:#FCFDFF}
+.note-head{display:flex;align-items:center;gap:8px;margin-bottom:5px}
+.note-head .pill{font-size:10.5px}
+.note-txt{width:100%;border:0;background:transparent;resize:vertical;font:inherit;font-size:12.5px;padding:0;outline:none}
+.cm-list{max-height:260px;overflow:auto}
 .t-comm{font-size:11px;color:var(--muted);margin-top:5px;white-space:pre-wrap;word-break:break-word;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden;border-top:1px dashed #E7EBF2;padding-top:4px}
 /* canceled project rows */
 tr.row-cancel td{background:#FDF1F2!important;color:#9AA3B2}
@@ -810,52 +815,112 @@ const C = document.getElementById('content');
 /* ================= 2026 INCENTIVE TARGETS ================= */
 const KPI_DEF=[
   ['sec','Variable incentive',null],
-  ['turnover','Turnover target (Country)','SAR'],
+  ['turnover','Turnover target (Country) — you enter the current figure','SAR'],
   ['vlA','Vendor registration — Consultant A (incl. authorities, developers & online portals)','n'],
   ['vlB','Vendor registration — Consultant B','n'],
   ['vlC','Vendor registration — Consultant C','n'],
   ['vlOther','of which authorities & developers','n'],
   ['sec2','Fixed incentive',null],
   ['control','Control — tracking sheet & Salesforce quality','zero'],
-  ['focus','Focus — specifications converted to business','n'],
+  ['focus','Focus — specifications converted to business (PO released, full or partial)','n'],
   ['fix','FiXperience registrations','n'],
   ['sem','Seminars delivered','n'],
   ['sbu','Seminars must cover at least 3 SBUs','n'],
   ['self','Self-development with teach back','n'],
   ['sec3','Additional incentive',null],
-  ['addl','Converted leads to orders above 100K SAR','n']
+  ['addl','Converted leads to orders (from under-construction projects)','n']
 ];
 function kpiTargets(){
-  const d={turnover:{t:1000000,m:900000,w:25}, vlA:{t:10,m:9,w:25}, vlB:{t:5,m:5,w:25}, vlC:{t:10,m:9,w:25},
+  const d={turnover:{t:150000000,m:135000000,w:25,manual:1,val:135000000}, vlA:{t:10,m:9,w:25}, vlB:{t:5,m:5,w:25}, vlC:{t:10,m:9,w:25},
     control:{t:0,m:0,w:20,manual:1,val:0}, focus:{t:7,m:7,w:15}, fix:{t:150,m:135,w:20},
-    sem:{t:20,m:18,w:25}, sbu:{t:3,m:3,w:0}, self:{t:2,m:1,w:20,manual:1,val:0}, addl:{t:10,m:0,w:0},
+    sem:{t:20,m:18,w:25}, sbu:{t:3,m:3,w:0}, self:{t:2,m:1,w:20,manual:1,val:0}, addl:{t:10,m:0,w:0,thr:100000},
     vlOther:{t:0,m:0,w:0,info:1}};
   S.meta.kpi = S.meta.kpi || {};
   Object.keys(d).forEach(k=>{ S.meta.kpi[k]=Object.assign({}, d[k], S.meta.kpi[k]||{}); });
   return S.meta.kpi;
 }
+/* a specification counts as converted once a PO is released, whether invoiced
+   in full or only partially */
+function poReleased(p){
+  if(String(p[PF.PO]).toLowerCase()==='yes') return true;
+  const inv=String(p[PF.INV]||'').toLowerCase();
+  return inv==='total' || inv==='partially';
+}
 function kpiActual(key, y){
   const K=mainKpi(y);
   const live=S.projects.filter(p=>p[PF.STATUS]!=='Canceled' && String(p[PF.YEAR])===y);
   switch(key){
-    case 'turnover': return live.reduce((s,p)=>s+(+p[PF.INVVAL]||0),0);
+    case 'turnover': return +((kpiTargets()['turnover']||{}).val)||0;   /* country turnover, entered by you */
     case 'vlA': return K.byClass.A + K.byClass.Auth + K.byClass.Dev + onlineRegistered(y).length;
     case 'vlB': return K.byClass.B;
     case 'vlC': return K.byClass.C;
     case 'vlOther': return K.byClass.Auth + K.byClass.Dev;
-    case 'focus': return live.filter(p=>String(p[PF.PO]).toLowerCase()==='yes').length;
+    case 'focus': return live.filter(poReleased).length;
     case 'fix': return kpiFix(y);
     case 'sem': return kpiSeminars(y);
     case 'sbu': return new Set(S.seminars.filter(s=>String(s[SF.DATE]).startsWith(y) && String(s[SF.SBU]||'').trim()).map(s=>s[SF.SBU])).size;
-    case 'addl': return Math.min(10, live.filter(p=>String(p[PF.PO]).toLowerCase()==='yes' && (+p[PF.EXP]||0)>=100000).length);
+    case 'addl': {
+      const T2=kpiTargets().addl, thr=+T2.thr||0, cap=+T2.t||0;
+      const n=live.filter(p=>poReleased(p) && (+p[PF.EXP]||0)>=thr).length;
+      return cap? Math.min(cap, n) : n;
+    }
     default: return +((kpiTargets()[key]||{}).val)||0;
   }
 }
+/* the records behind each incentive figure, so a row can be opened and checked */
+function kpiEvidence(key, y){
+  const K=mainKpi(y);
+  const live=S.projects.filter(p=>p[PF.STATUS]!=='Canceled' && String(p[PF.YEAR])===y);
+  const sbuOf=cls=>sbuLines(y).filter(l=>l.cls===cls)
+        .map(l=>({n:l.co+' — '+l.sbu, t:(l.vl?'vendor list '+fmtDate(l.vl):'in drawings '+fmtDate(l.dr))}));
+  const portals=()=>onlineRegistered(y).map(r=>({n:r[RF.COMPANY]+' (online portal)', t:r[RF.DATE]?fmtDate(r[RF.DATE]):'no date'}));
+  switch(key){
+    case 'turnover': {
+      const mine=live.filter(p=>(+p[PF.INVVAL]||0)>0)
+        .sort((a,b)=>(+b[PF.INVVAL]||0)-(+a[PF.INVVAL]||0))
+        .map(p=>({n:p[PF.PROJ]||'(no name)', t:fmtSAR(+p[PF.INVVAL]||0)+(p[PF.CONS]?' · '+p[PF.CONS]:'')}));
+      const tot=mine.reduce((s,p)=>s+0,0);
+      return [{n:'Country turnover is entered by hand', t:'the list below is only your own invoiced projects, for reference'}, ...mine];
+    }
+    case 'vlA': return [...sbuOf('A'), ...sbuOf('Auth'), ...sbuOf('Dev'), ...portals()];
+    case 'vlB': return sbuOf('B');
+    case 'vlC': return sbuOf('C');
+    case 'vlOther': return [...sbuOf('Auth'), ...sbuOf('Dev')];
+    case 'focus': return live.filter(poReleased)
+        .map(p=>({n:p[PF.PROJ]||'(no name)', t:[p[PF.SBU]||'', p[PF.INV]?'invoiced '+p[PF.INV].toLowerCase():'', (+p[PF.INVVAL]||0)?fmtSAR(+p[PF.INVVAL]):''].filter(Boolean).join(' · ')}));
+    case 'fix': return fixContributors(y).map(c=>({n:c[CF.COMPANY]||c[CF.NAME], t:(+c[CF.NFIX]||0)+' install'+((+c[CF.NFIX]||0)>1?'s':'')+' · '+(c[CF.FIXDATE]?fmtDate(c[CF.FIXDATE]):'no date')}));
+    case 'sem': return S.seminars.filter(s=>String(s[SF.DATE]).startsWith(y))
+        .sort((a,b)=>(b[SF.DATE]||'')<(a[SF.DATE]||'')?-1:1)
+        .map(s=>({n:s[SF.NAME], t:fmtDate(s[SF.DATE])+(s[SF.SBU]?' · '+s[SF.SBU]:'')+((+s[SF.PART]||0)?' · '+s[SF.PART]+' pax':'')}));
+    case 'sbu': {
+      const m={};
+      S.seminars.filter(s=>String(s[SF.DATE]).startsWith(y) && String(s[SF.SBU]||'').trim())
+        .forEach(s=>{ (m[s[SF.SBU]]=m[s[SF.SBU]]||[]).push(s[SF.NAME]); });
+      return Object.keys(m).map(k2=>({n:k2, t:m[k2].length+' seminar'+(m[k2].length>1?'s':'')+': '+m[k2].slice(0,3).join(', ')+(m[k2].length>3?'…':'')}));
+    }
+    case 'addl': {
+      const thr=+(kpiTargets().addl.thr)||0;
+      return live.filter(p=>poReleased(p) && (+p[PF.EXP]||0)>=thr)
+        .sort((a,b)=>(+b[PF.EXP]||0)-(+a[PF.EXP]||0))
+        .map(p=>({n:p[PF.PROJ]||'(no name)', t:fmtSAR(+p[PF.EXP]||0)+(p[PF.CONS]?' · '+p[PF.CONS]:'')}));
+    }
+    default: return [];
+  }
+}
+function toggleKpiRow(key){ OPENED.kpi[key]=!OPENED.kpi[key]; renderDash(); }
+function kpiRowOpen(key){ return !!OPENED.kpi[key]; }
 function kpiEditVal(key, v){
   kpiTargets()[key].val=Math.max(0, parseInt(String(v).replace(/\D/g,''),10)||0);
   save('meta'); renderDash();
 }
 function kpiHidden(){ return !!(S.meta && S.meta.kpiHidden); }
+function kpiLocked(){ return !(S.meta && S.meta.kpiUnlocked); }
+function toggleKpiLock(){
+  S.meta.kpiUnlocked=kpiLocked();
+  save('meta'); renderDash();
+  toast(kpiLocked()?'Targets locked. They cannot be changed by mistake.':'Targets unlocked. Click a value to edit it.');
+  logChange('Incentive targets '+(kpiLocked()?'locked':'unlocked'), 'Targets');
+}
 function toggleKpiPrivacy(){
   S.meta.kpiHidden=!kpiHidden(); save('meta'); renderDash();
   toast(kpiHidden()?'Figures hidden. Press again to show them.':'Figures visible');
@@ -863,6 +928,7 @@ function toggleKpiPrivacy(){
 function renderTargets(y){
   const T=kpiTargets();
   const hid=kpiHidden();
+  const lck=kpiLocked();
   const mask=v=>hid?'•••':v;
   const row=(key,label,unit)=>{
     const t=T[key]; if(!t) return '';
@@ -879,24 +945,40 @@ function renderTargets(y){
     const hitTgt = key==='control' ? act===0 : (tgt? act>=tgt : act>0);
     const col = hitTgt? 'var(--green)' : (hitMin? 'var(--amber)' : 'var(--red)');
     const fmtV = v => unit==='SAR' ? fmtSAR(v) : String(v);
-    return `<tr>
-      <td style="font-size:12.5px">${esc(label)}${t.manual?' <span class="cell-sub">(you enter this)</span>':''}</td>
-      <td style="text-align:right;font-weight:800;white-space:nowrap">${hid?'•••':(t.manual
-          ? `<input type="number" min="0" value="${act}" style="width:64px;text-align:right" onchange="kpiEditVal('${key}',this.value)">`
+    const ev=kpiEvidence(key, y);
+    const open=kpiRowOpen(key);
+    return `<tr${ev.length?' style="cursor:pointer" onclick="toggleKpiRow(\''+key+'\')"':''}>
+      <td style="font-size:12.5px">${ev.length?`<span style="color:var(--muted);font-size:11px">${open?'▲':'▼'}</span> `:''}${esc(label)}${t.manual?' <span class="cell-sub">(you enter this)</span>':''}
+        ${t.thr!==undefined&&!hid?`<div class="cell-sub" style="margin-top:3px">counts orders of at least ${lck?'<b>'+fmtNum(+t.thr||0)+'</b>':
+          `<input type="text" inputmode="numeric" value="${fmtNum(+t.thr||0)}" style="width:96px;text-align:right;font-size:11.5px;padding:2px 5px" title="Qualifying order value" onclick="event.stopPropagation()" onchange="kpiSet('${key}','thr',this.value)">`} SAR</div>`:''}</td>
+      <td style="text-align:right;font-weight:800;white-space:nowrap" title="${t.manual?'You report this figure — always editable':''}">${hid?'•••':(t.manual
+          ? `<input type="text" inputmode="numeric" value="${unit==='SAR'?fmtNum(act):act}" style="width:${unit==='SAR'?'112px':'64px'};text-align:right" onchange="kpiEditVal('${key}',this.value)">`
           : fmtV(act))}</td>
-      <td style="text-align:right;white-space:nowrap">${hid?'•••':(key==='control'?'zero tolerance':fmtV(tgt))}</td>
-      <td style="text-align:right;white-space:nowrap" class="cell-sub">${hid?'•••':(key==='control'?'—':fmtV(+t.m||0))}</td>
+      <td style="text-align:right;white-space:nowrap;font-weight:700">${hid?'•••':(key==='control'?'zero tolerance':(lck?fmtV(tgt):
+        `<input type="text" inputmode="numeric" value="${unit==='SAR'?fmtNum(tgt):tgt}" style="width:${unit==='SAR'?'104px':'58px'};text-align:right;font-weight:700" title="Target" onclick="event.stopPropagation()" onchange="kpiSet('${key}','t',this.value)">`))}</td>
+      <td style="text-align:right;white-space:nowrap" class="cell-sub">${hid?'•••':(key==='control'?'—':(lck?fmtV(+t.m||0):
+        `<input type="text" inputmode="numeric" value="${unit==='SAR'?fmtNum(+t.m||0):(+t.m||0)}" style="width:${unit==='SAR'?'104px':'58px'};text-align:right;font-size:12px" title="Qualifying minimum" onclick="event.stopPropagation()" onchange="kpiSet('${key}','m',this.value)">`))}</td>
       <td style="width:150px">${hid?'<div class="cell-sub">hidden</div>':`<div style="background:var(--soft);border-radius:6px;height:14px;overflow:hidden">
         <div style="width:${pct}%;height:100%;background:${col};border-radius:6px"></div></div>
         <div class="cell-sub" style="text-align:right">${pct}%</div>`}</td>
       <td style="text-align:right;font-weight:700">${t.w?t.w+'%':'—'}</td>
       <td>${hid?'':`<span class="pill ${hitTgt?'p-green':(hitMin?'p-amber':'p-red')}">${hitTgt?'target met':(hitMin?'minimum met':'below')}</span>`}</td>
-    </tr>`;
+    </tr>
+    ${open&&!hid?`<tr><td colspan="7" style="background:#F7F9FC;padding:9px 12px">
+      <div class="cell-sub" style="margin-bottom:6px">${ev.length} record${ev.length===1?'':'s'} behind this figure</div>
+      <div style="max-height:260px;overflow:auto">
+        ${ev.map((e,i)=>`<div style="display:flex;gap:9px;align-items:baseline;padding:5px 0;border-bottom:1px solid #E9EDF3">
+          <span class="cell-sub" style="width:22px;flex-shrink:0;text-align:right">${i+1}.</span>
+          <span style="flex:1;font-size:12.5px;font-weight:600" dir="auto">${esc(e.n)}</span>
+          <span class="cell-sub" style="text-align:right;white-space:nowrap">${esc(e.t||'')}</span>
+        </div>`).join('')}
+      </div></td></tr>`:''}`;
   };
   return `<div class="card" style="padding:14px 16px;margin-bottom:14px">
     <div class="section-h" style="margin:0 0 10px"><h2>Incentive targets ${y}</h2>
-      <span class="hint">progress against your agreed plan</span>
+      <span class="hint">click any line to see what is behind the number</span>
       <div class="right">
+        <button class="btn sm ${lck?'':'navy'}" onclick="toggleKpiLock()" title="${lck?'Targets are protected. Click to allow editing.':'Editing is on. Click to protect them again.'}">${lck?'🔒 Targets locked':'✏️ Editing targets'}</button>
         <button class="btn sm ${hid?'navy':''}" onclick="toggleKpiPrivacy()" title="Hide the figures when someone is at your shoulder">${hid?'👁 Show figures':'🙈 Hide figures'}</button>
         <button class="btn sm" onclick="openTargetEditor()">Edit targets</button></div></div>
     <div class="tbl-wrap" style="box-shadow:none;border:0"><table class="tbl">
@@ -913,22 +995,29 @@ function openTargetEditor(){
   const T=kpiTargets();
   document.getElementById('m-title').textContent='Edit incentive targets';
   document.getElementById('m-body').innerHTML=`
+    ${kpiLocked()?`<div class="card" style="padding:10px 13px;margin-bottom:10px;border-left:4px solid var(--amber)">
+      <div style="font-weight:800;font-size:12.5px;margin-bottom:3px">Targets are locked</div>
+      <div class="cell-sub">They are shown here for reference. Unlock to change them.</div>
+      <div style="margin-top:7px"><button class="btn sm navy" onclick="toggleKpiLock();openTargetEditor()">Unlock targets</button></div></div>`:''}
     <div class="mini-note" style="margin-bottom:9px">Change the target, the qualifying minimum and the weighting. Everything else is read straight from your data.</div>
-    <table class="tbl"><thead><tr><th>Item</th><th style="width:110px">Target</th><th style="width:110px">Min</th><th style="width:80px">Weight %</th></tr></thead><tbody>
+    <table class="tbl"><thead><tr><th>Item</th><th style="width:110px">Target</th><th style="width:110px">Min</th><th style="width:110px">Order value</th><th style="width:80px">Weight %</th></tr></thead><tbody>
     ${KPI_DEF.filter(([k])=>!k.startsWith('sec')).map(([k,lab])=>`<tr>
       <td style="font-size:12px">${esc(lab)}</td>
-      <td><input type="number" value="${+T[k].t||0}" onchange="kpiSet('${k}','t',this.value)"></td>
-      <td><input type="number" value="${+T[k].m||0}" onchange="kpiSet('${k}','m',this.value)"></td>
-      <td><input type="number" value="${+T[k].w||0}" onchange="kpiSet('${k}','w',this.value)"></td>
+      <td><input type="number" value="${+T[k].t||0}" ${kpiLocked()?'disabled':''} onchange="kpiSet('${k}','t',this.value)"></td>
+      <td><input type="number" value="${+T[k].m||0}" ${kpiLocked()?'disabled':''} onchange="kpiSet('${k}','m',this.value)"></td>
+      <td>${T[k].thr!==undefined?`<input type="number" value="${+T[k].thr||0}" ${kpiLocked()?'disabled':''} onchange="kpiSet('${k}','thr',this.value)">`:'<span class="cell-sub">—</span>'}</td>
+      <td><input type="number" value="${+T[k].w||0}" ${kpiLocked()?'disabled':''} onchange="kpiSet('${k}','w',this.value)"></td>
     </tr>`).join('')}
     </tbody></table>`;
   document.getElementById('m-foot').innerHTML=`<button class="btn primary" onclick="closeModal();renderDash()">Done</button>`;
   document.getElementById('modal-back').classList.add('open');
 }
 function kpiSet(key, field, v){
+  if(kpiLocked()){ toast('Targets are locked. Press 🔒 Targets locked to unlock.', true); renderDash(); return; }
   kpiTargets()[key][field]=parseInt(String(v).replace(/[^\d]/g,''),10)||0;
   save('meta');
   logChange('Target changed: '+key+' '+field+' = '+v, 'Targets');
+  renderDash();
 }
 
 /* ================= DASHBOARD ================= */
@@ -946,12 +1035,16 @@ function potentialSbus(){
   const rank={'In the Drawings':0,'Waiting for a Response':1,'In Progress':2,'Potential':3};
   return out.sort((a,b)=>(rank[a.stage]??9)-(rank[b.stage]??9) || a.co.localeCompare(b.co));
 }
-function togglePanel(key){
-  S.meta.panels = S.meta.panels || {};
-  S.meta.panels[key] = !S.meta.panels[key];
-  save('meta'); renderDash();
+/* panels and evidence rows are collapsed whenever the hub opens: the state lives
+   in memory only, so it never carries over from the last session */
+const OPENED={panels:{}, kpi:{}};
+function togglePanel(key){ OPENED.panels[key]=!OPENED.panels[key]; renderDash(); }
+function panelOpen(key){ return !!OPENED.panels[key]; }
+function collapseAllPanels(){
+  OPENED.panels={}; OPENED.kpi={};
+  renderDash();
+  toast('Everything collapsed');
 }
-function panelOpen(key){ return !!(S.meta && S.meta.panels && S.meta.panels[key]); }
 function collapsible(key, title, count, bodyHtml, accent){
   const open=panelOpen(key);
   return `<div class="card" style="padding:12px 15px;margin-bottom:12px;border-left:4px solid ${accent||'var(--navy)'}">
@@ -1100,6 +1193,8 @@ function renderDash(){
       ${st!=='granted'?`<div class="mini-note" style="margin-top:${tt.length?'7px':'0'}">Alerts currently appear only while the hub is open.
         <button class="btn sm navy" style="margin-left:6px" onclick="askNotifyPermission()">Turn on desktop notifications</button></div>`:''}
     </div>`;})()}
+  ${(Object.values(OPENED.panels).some(Boolean)||Object.values(OPENED.kpi).some(Boolean))
+    ? `<div style="margin:0 0 12px"><button class="btn sm" onclick="collapseAllPanels()">▲ Collapse everything</button></div>` : ''}
   <div class="section-h"><h2>Quick actions</h2></div>
   <div style="display:flex;gap:8px;flex-wrap:wrap">
     <button class="btn primary" onclick="openContactForm()">+ New contact</button>
@@ -3107,7 +3202,8 @@ function renderTasks(){
             ${t[TF.REPEAT]?`<span class="pill p-navy" title="Repeats: ${esc(t[TF.REPEAT])}">🔁 ${esc(t[TF.REPEAT])}</span>`:''}
             ${f.hideComments && t[TF.COMMENTS] ? '💬' : ''}
           </div>
-          ${!f.hideComments && t[TF.COMMENTS] ? `<div class="t-comm" dir="auto">${esc(t[TF.COMMENTS])}</div>` : ''}
+          ${!f.hideComments && t[TF.COMMENTS] ? (()=>{const ns=parseNotes(t[TF.COMMENTS]); const last=ns[ns.length-1];
+              return `<div class="t-comm" dir="auto">${last&&last.d?`<b>${esc(last.d)}</b> · `:''}${esc(last?last.t:t[TF.COMMENTS])}${ns.length>1?`<span class="cell-sub"> · +${ns.length-1} earlier note${ns.length>2?'s':''}</span>`:''}</div>`;})() : ''}
         </div>`).join('') || '<div class="empty" style="padding:12px;font-size:12px">Drop tasks here</div>'}
       </div>`;}).join('')}
   </div>`;
@@ -3322,12 +3418,12 @@ function openForm(title, fields, rec, onSave, extraFoot){
     let inp;
     if(f.type==='comments'){
       inp=`<div data-k="${f.k}" data-type="comments">
-        <textarea class="cm-box" dir="auto" style="min-height:90px">${esc(val)}</textarea>
-        <div style="display:flex;gap:6px;margin-top:6px">
-          <input class="cm-new" placeholder="Add a dated note…" style="flex:1" onkeydown="if(event.key==='Enter'){event.preventDefault();addDatedNote(this);}">
-          <button type="button" class="btn sm primary" onclick="addDatedNote(this.previousElementSibling)">+ Add dated note</button>
+        <div class="cm-list">${noteCards(val)}</div>
+        <div style="display:flex;gap:6px;margin-top:8px">
+          <input class="cm-new" placeholder="Write a note, it is stamped with today's date…" style="flex:1" onkeydown="if(event.key==='Enter'){event.preventDefault();addDatedNote(this);}">
+          <button type="button" class="btn sm primary" onclick="addDatedNote(this.previousElementSibling)">+ Add note</button>
         </div>
-        <div class="mini-note" style="margin-top:4px">Each note is stamped with today's date so a long history stays readable.</div>
+        <textarea class="cm-box" style="display:none">${esc(val)}</textarea>
       </div>`;
     } else if(f.type==='labels'){
       const cur=String(val||'').split(';').map(x=>x.trim()).filter(Boolean);
@@ -3365,15 +3461,62 @@ function openForm(title, fields, rec, onSave, extraFoot){
   };
   document.getElementById('modal-back').classList.add('open');
 }
+/* comments are stored as one text field, but shown and edited as dated cards */
+function parseNotes(raw){
+  const txt=String(raw||'').trim();
+  if(!txt) return [];
+  const out=[];
+  txt.split('\n').forEach(line=>{
+    const m=line.match(/^\s*\[([^\]]+)\]\s*([\s\S]*)$/);
+    if(m) out.push({d:m[1].trim(), t:m[2].trim()});
+    else if(out.length) out[out.length-1].t += (out[out.length-1].t?'\n':'')+line;   /* continuation */
+    else out.push({d:'', t:line});
+  });
+  return out;
+}
+function serialiseNotes(list){
+  return list.filter(n=>String(n.t||'').trim())
+             .map(n=>(n.d?'['+n.d+'] ':'')+String(n.t).trim())
+             .join('\n');
+}
+function noteCards(raw){
+  const list=parseNotes(raw);
+  if(!list.length) return '<div class="cell-sub" style="padding:6px 0">No notes yet.</div>';
+  return list.map((n,i)=>`
+    <div class="note-card" data-i="${i}">
+      <div class="note-head">
+        <span class="pill p-navy">${esc(n.d||'no date')}</span>
+        <button type="button" class="icon-btn" title="Delete this note" onclick="deleteNote(this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M9 7V5h6v2m-8 0l1 13h8l1-13"/></svg></button>
+      </div>
+      <textarea class="note-txt" dir="auto" rows="2" oninput="syncNotes(this)">${esc(n.t)}</textarea>
+    </div>`).join('');
+}
+function notesHolder(el){ return el.closest('[data-type="comments"]'); }
+function syncNotes(el){
+  const h=notesHolder(el);
+  const list=[...h.querySelectorAll('.note-card')].map(c=>({
+    d:c.querySelector('.pill').textContent.replace('no date','').trim(),
+    t:c.querySelector('.note-txt').value
+  }));
+  h.querySelector('.cm-box').value=serialiseNotes(list);
+}
+function deleteNote(btn){
+  const h=notesHolder(btn);
+  btn.closest('.note-card').remove();
+  syncNotes(h.querySelector('.cm-box'));
+  const l=h.querySelector('.cm-list');
+  if(!l.querySelector('.note-card')) l.innerHTML='<div class="cell-sub" style="padding:6px 0">No notes yet.</div>';
+}
 function addDatedNote(inp){
-  const box=inp.closest('[data-type="comments"]').querySelector('.cm-box');
+  const h=notesHolder(inp);
   const txt=String(inp.value||'').trim();
   if(!txt){ inp.focus(); return; }
-  const line='['+fmtDate(today())+'] '+txt;
-  box.value = box.value.trim() ? box.value.trim()+'\n'+line : line;
-  inp.value='';
-  box.scrollTop=box.scrollHeight;
-  inp.focus();
+  const box=h.querySelector('.cm-box');
+  const list=parseNotes(box.value);
+  list.push({d:fmtDate(today()), t:txt});
+  box.value=serialiseNotes(list);
+  h.querySelector('.cm-list').innerHTML=noteCards(box.value);
+  inp.value=''; inp.focus();
 }
 function closeModal(){ document.getElementById('modal-back').classList.remove('open'); }
 /* clicking the dim area no longer closes the form: too easy to lose typed data.
@@ -4415,6 +4558,7 @@ function ensureTaskOrders(){
   S.meta.deletedSeminars = S.meta.deletedSeminars || [];
   S.meta.gapIgnored = S.meta.gapIgnored || [];
   S.meta.tgIgnored = S.meta.tgIgnored || [];
+  if(S.meta.panels || S.meta.kpiOpen){ delete S.meta.panels; delete S.meta.kpiOpen; save('meta'); }
   S.meta.dupSkipped = S.meta.dupSkipped || [];
   S.meta.log = S.meta.log || [];
   S.contacts.forEach(c=>{ while(c.length<16) c.push(''); });
