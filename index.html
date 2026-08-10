@@ -305,6 +305,13 @@ select.cell-sel:hover{border-color:var(--line);background:#fff}
 .tcol h3[draggable]:active{cursor:grabbing}
 .board.stacked{display:block;overflow-x:visible}
 .board.stacked .tcol{width:auto;max-width:820px;margin:0 0 14px;flex:none}
+.tcard{position:relative}
+.tcard.drop-above::before,.tcard.drop-below::after{
+  content:'';position:absolute;left:-2px;right:-2px;height:4px;border-radius:3px;
+  background:var(--red);box-shadow:0 0 0 2px rgba(226,0,26,.18)}
+.tcard.drop-above::before{top:-5px}
+.tcard.drop-below::after{bottom:-5px}
+.tcard.dragging{opacity:.45;transform:scale(.98)}
 .note-card{border:1px solid var(--line);border-radius:9px;padding:8px 10px;margin-bottom:7px;background:#FCFDFF}
 .note-head{display:flex;align-items:center;gap:8px;margin-bottom:5px}
 .note-head .pill{font-size:10.5px}
@@ -3183,7 +3190,7 @@ function renderTasks(){
         <h3 draggable="true" ondragstart="dragBucket(event,'${esc(b)}')" ondragend="clearBucketDrag()" title="Drag to reorder buckets">↕ ${esc(b)}<span class="bcnt">${list.length}</span>
           <button class="icon-btn" style="padding:1px 4px" onclick="openTaskForm(null,'${esc(b)}')" title="Add task to ${esc(b)}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" style="width:14px;height:14px"><path d="M12 5v14M5 12h14"/></svg></button></h3>
         ${list.map(t=>`
-        <div class="tcard ${t[TF.STATUS]==='Completed'?'done':''}" draggable="true" ondragstart="dragTask(event,${t[TF.ID]})" ondragend="this.classList.remove('dragging')" ondragover="event.preventDefault();event.stopPropagation()" ondrop="dropOnCard(event,${t[TF.ID]})">
+        <div class="tcard ${t[TF.STATUS]==='Completed'?'done':''}" draggable="true" ondragstart="dragTask(event,${t[TF.ID]})" ondragend="this.classList.remove('dragging');clearDropMarks()" ondragover="cardDragOver(event,this)" ondragleave="this.classList.remove('drop-above','drop-below')" ondrop="dropOnCard(event,${t[TF.ID]},this)">
           <div style="display:flex;gap:8px;align-items:flex-start">
             <button class="t-status-btn ${taskDotCls(t[TF.STATUS])}" onclick="cycleTask(${t[TF.ID]});keepScroll(renderTasks)" title="${t[TF.STATUS]} — click to advance">${t[TF.STATUS]==='Completed'?'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.4"><path d="M5 12.5l4.5 4.5L19 8"/></svg>':''}</button>
             <div class="t-name" style="flex:1;cursor:pointer" dir="auto" onclick="openTaskForm(${t[TF.ID]})">${t[TF.NAME]?esc(t[TF.NAME]):'<i style="color:var(--muted)">(untitled task — click to name it)</i>'}</div>
@@ -3226,6 +3233,7 @@ function dragTask(ev, id){
   ev.dataTransfer.setData('text/plain', String(id));
   ev.dataTransfer.effectAllowed='move';
   ev.target.classList.add('dragging');
+  clearDropMarks();
 }
 function bucketOrders(b){ return S.tasks.filter(x=>x[TF.BUCKET]===b && x[TF.STATUS]!=='Completed').map(x=>x[TF.ORDER]).filter(o=>o!==undefined && o!==''); }
 function renormalizeBucket(b){
@@ -3261,7 +3269,7 @@ function dragBucket(ev, bucket){
   ev.dataTransfer.effectAllowed='move';
   ev.stopPropagation();
 }
-function clearBucketDrag(){ _draggingBucket=null; document.querySelectorAll('.tcol.bucket-target').forEach(c=>c.classList.remove('bucket-target')); }
+function clearBucketDrag(){ _draggingBucket=null; document.querySelectorAll('.tcol.bucket-target').forEach(c=>c.classList.remove('bucket-target')); clearDropMarks(); }
 function bucketOrCardDragover(ev, col){
   ev.preventDefault();
   if(_draggingBucket){ col.classList.add('bucket-target'); }
@@ -3288,18 +3296,33 @@ function dropTaskOrBucket(ev, col, bucket){
   }
   dropTask(ev, col);
 }
-function dropOnCard(ev, targetId){
+/* while a card is dragged over another, show where it would land */
+function cardDragOver(ev, el){
+  ev.preventDefault(); ev.stopPropagation();
+  if(_draggingBucket) return;
+  const r=el.getBoundingClientRect();
+  const below = (ev.clientY - r.top) > r.height/2;
+  el.classList.toggle('drop-above', !below);
+  el.classList.toggle('drop-below', below);
+}
+function clearDropMarks(){
+  document.querySelectorAll('.tcard.drop-above,.tcard.drop-below')
+    .forEach(c=>c.classList.remove('drop-above','drop-below'));
+}
+function dropOnCard(ev, targetId, el){
   ev.preventDefault(); ev.stopPropagation();
   const col=ev.currentTarget.closest ? ev.currentTarget.closest('.tcol') : null;
   if(col) col.classList.remove('dragover');
   document.querySelectorAll('.tcol.dragover').forEach(c=>c.classList.remove('dragover'));
+  const below = !!(el && el.classList.contains('drop-below'));
+  clearDropMarks();
   const id=+ev.dataTransfer.getData('text/plain');
   if(id===targetId) return;
   const t=S.tasks.find(x=>x[TF.ID]===id), tgt=S.tasks.find(x=>x[TF.ID]===targetId);
   if(!t||!tgt) return;
   const crossBucket = t[TF.BUCKET]!==tgt[TF.BUCKET];
   if(crossBucket) applyBucketChange(t, tgt[TF.BUCKET]);
-  t[TF.ORDER]=(tgt[TF.ORDER]??0)-5;   /* insert above the card it was dropped on */
+  t[TF.ORDER]=(tgt[TF.ORDER]??0)+(below?5:-5);   /* drop on the lower half to go under */
   renormalizeBucket(tgt[TF.BUCKET]);
   save('tasks');
   keepScroll(renderTasks);
