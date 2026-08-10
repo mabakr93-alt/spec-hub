@@ -312,11 +312,16 @@ select.cell-sel:hover{border-color:var(--line);background:#fff}
 .tcard.drop-above::before{top:-5px}
 .tcard.drop-below::after{bottom:-5px}
 .tcard.dragging{opacity:.45;transform:scale(.98)}
-.note-card{border:1px solid var(--line);border-radius:9px;padding:8px 10px;margin-bottom:7px;background:#FCFDFF}
-.note-head{display:flex;align-items:center;gap:8px;margin-bottom:5px}
-.note-head .pill{font-size:10.5px}
-.note-txt{width:100%;border:0;background:transparent;resize:vertical;font:inherit;font-size:12.5px;padding:0;outline:none}
-.cm-list{max-height:260px;overflow:auto}
+.note-card{display:flex;align-items:flex-start;gap:7px;border:1px solid var(--line);border-radius:7px;
+  padding:4px 6px;margin-bottom:4px;background:#FCFDFF}
+.note-stamp{flex:0 0 auto;font-size:10px;font-weight:700;color:var(--navy);background:var(--soft);
+  border-radius:5px;padding:3px 6px;white-space:nowrap;line-height:1.25;margin-top:1px}
+.note-txt{flex:1;min-width:0;border:0;background:transparent;resize:none;overflow:hidden;
+  font:inherit;font-size:12px;line-height:1.45;padding:2px 0;outline:none}
+.note-del{flex:0 0 auto;opacity:.45}
+.note-card:hover .note-del{opacity:1}
+.cm-list{max-height:300px;overflow:auto;padding-right:2px}
+@media(max-width:640px){.note-card{flex-wrap:wrap}.note-txt{flex:1 0 100%;order:3}}
 .t-comm{font-size:11px;color:var(--muted);margin-top:5px;white-space:pre-wrap;word-break:break-word;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden;border-top:1px dashed #E7EBF2;padding-top:4px}
 /* canceled project rows */
 tr.row-cancel td{background:#FDF1F2!important;color:#9AA3B2}
@@ -3501,18 +3506,17 @@ function noteCards(raw){
   if(!list.length) return '<div class="cell-sub" style="padding:6px 0">No notes yet.</div>';
   return list.map((n,i)=>`
     <div class="note-card" data-i="${i}">
-      <div class="note-head">
-        <span class="pill p-navy">${esc(n.d||'no date')}</span>
-        <button type="button" class="icon-btn" title="Delete this note" onclick="deleteNote(this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M9 7V5h6v2m-8 0l1 13h8l1-13"/></svg></button>
-      </div>
-      <textarea class="note-txt" dir="auto" rows="2" oninput="syncNotes(this)">${esc(n.t)}</textarea>
+      <span class="note-stamp" title="${esc(n.d||'')}">${esc(n.d||'no date')}</span>
+      <textarea class="note-txt" dir="auto" rows="1" oninput="syncNotes(this);autoGrow(this)">${esc(n.t)}</textarea>
+      <button type="button" class="icon-btn note-del" title="Delete this note" onclick="deleteNote(this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M9 7V5h6v2m-8 0l1 13h8l1-13"/></svg></button>
     </div>`).join('');
 }
+function autoGrow(el){ el.style.height='auto'; el.style.height=Math.min(el.scrollHeight,120)+'px'; }
 function notesHolder(el){ return el.closest('[data-type="comments"]'); }
 function syncNotes(el){
   const h=notesHolder(el);
   const list=[...h.querySelectorAll('.note-card')].map(c=>({
-    d:c.querySelector('.pill').textContent.replace('no date','').trim(),
+    d:c.querySelector('.note-stamp').textContent.replace('no date','').trim(),
     t:c.querySelector('.note-txt').value
   }));
   h.querySelector('.cm-box').value=serialiseNotes(list);
@@ -3524,13 +3528,17 @@ function deleteNote(btn){
   const l=h.querySelector('.cm-list');
   if(!l.querySelector('.note-card')) l.innerHTML='<div class="cell-sub" style="padding:6px 0">No notes yet.</div>';
 }
+function stampNote(){
+  const d=new Date(), p=n=>String(n).padStart(2,'0');
+  return fmtDate(today())+' · '+p(d.getHours())+':'+p(d.getMinutes());
+}
 function addDatedNote(inp){
   const h=notesHolder(inp);
   const txt=String(inp.value||'').trim();
   if(!txt){ inp.focus(); return; }
   const box=h.querySelector('.cm-box');
   const list=parseNotes(box.value);
-  list.push({d:fmtDate(today()), t:txt});
+  list.push({d:stampNote(), t:txt});
   box.value=serialiseNotes(list);
   h.querySelector('.cm-list').innerHTML=noteCards(box.value);
   inp.value=''; inp.focus();
