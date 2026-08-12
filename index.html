@@ -314,6 +314,8 @@ select.cell-sel:hover{border-color:var(--line);background:#fff}
 .tcard.drop-above::before{top:-5px}
 .tcard.drop-below::after{bottom:-5px}
 .tcard.dragging{opacity:.45;transform:scale(.98)}
+.note-dropping{outline:2px dashed var(--red);outline-offset:2px;border-radius:6px}
+.note-txt::placeholder{color:#B9C2CF;font-size:11.5px}
 .note-imgs{display:flex;gap:6px;flex-wrap:wrap;margin-top:5px}
 .note-thumb{position:relative;display:inline-block}
 .note-thumb img{width:64px;height:64px;object-fit:cover;border-radius:7px;border:1px solid var(--line);cursor:zoom-in;display:block}
@@ -3463,7 +3465,7 @@ function openForm(title, fields, rec, onSave, extraFoot){
       inp=`<div data-k="${f.k}" data-type="comments">
         <div class="cm-list">${noteCards(val)}</div>
         <div style="display:flex;gap:6px;margin-top:8px">
-          <input class="cm-new" placeholder="Write a note, it is stamped with today's date…" style="flex:1" onkeydown="if(event.key==='Enter'){event.preventDefault();addDatedNote(this);}">
+          <input class="cm-new" placeholder="Write a note, or paste a screenshot with Ctrl+V…" style="flex:1" onkeydown="if(event.key==='Enter'){event.preventDefault();addDatedNote(this);}" onpaste="composePaste(event,this)" ondragover="noteDragOver(event,this)" ondragleave="this.classList.remove('note-dropping')" ondrop="composeDrop(event,this)">
           <button type="button" class="btn sm primary" onclick="addDatedNote(this.previousElementSibling)">+ Add note</button>
         </div>
         <textarea class="cm-box" style="display:none">${esc(val)}</textarea>
@@ -3529,7 +3531,7 @@ function noteCards(raw){
     <div class="note-card" data-i="${i}">
       <span class="note-stamp" title="${esc(n.d||'')}">${esc(n.d||'no date')}</span>
       <div style="flex:1;min-width:0">
-        <textarea class="note-txt" dir="auto" rows="1" data-img="${esc(imgTokens(n.t).map(x=>'[[img:'+x+']]').join(''))}" oninput="syncNotes(this);autoGrow(this)">${esc(stripImgTokens(n.t))}</textarea>
+        <textarea class="note-txt" dir="auto" rows="1" data-img="${esc(imgTokens(n.t).map(x=>'[[img:'+x+']]').join(''))}" placeholder="paste a screenshot here with Ctrl+V" oninput="syncNotes(this);autoGrow(this)" onpaste="notePaste(event,this)" ondragover="noteDragOver(event,this)" ondragleave="this.classList.remove('note-dropping')" ondrop="noteDrop(event,this)">${esc(stripImgTokens(n.t))}</textarea>
         ${imgTokens(n.t).length?`<div class="note-imgs">${imgTokens(n.t).map(id=>{
           const d=imgStore()[id];
           return d?`<span class="note-thumb"><img src="${d}" onclick="viewImage('${id}')" title="Open">
@@ -3596,6 +3598,7 @@ async function attachImage(btn, file){
     imgStore()[id]=data; save('images');
     const card=btn.closest('.note-card');
     const h=notesHolder(btn);
+    if(!card || !h){ toast('Could not find the note to attach to', true); return; }
     if(card){
       const ta=card.querySelector('.note-txt');
       ta.dataset.img=(ta.dataset.img||'')+'[[img:'+id+']]';
@@ -3606,6 +3609,28 @@ async function attachImage(btn, file){
     logChange('Picture added to a note', 'Tasks');
     toast('Picture added ('+fmtKB(data.length*0.75)+')'+(imgBytes()>IMG_WARN?' · storage is getting large':''));
   }catch(e){ toast('Could not add that picture: '+e.message, true); }
+}
+/* Ctrl+V a screenshot straight into a note, or drop a file onto it */
+async function noteImageFromEvent(ev, el){
+  const dt = ev.clipboardData || ev.dataTransfer;
+  if(!dt) return false;
+  let file=null;
+  if(dt.items){
+    for(const it of dt.items){
+      if(it.kind==='file' && /^image\//.test(it.type||'')){ file=it.getAsFile(); break; }
+    }
+  }
+  if(!file && dt.files && dt.files.length && /^image\//.test(dt.files[0].type||'')) file=dt.files[0];
+  if(!file) return false;
+  ev.preventDefault();
+  await attachImage(el, file);
+  return true;
+}
+function notePaste(ev, el){ noteImageFromEvent(ev, el); }
+function noteDrop(ev, el){ el.classList.remove('note-dropping'); noteImageFromEvent(ev, el); }
+function noteDragOver(ev, el){
+  const dt=ev.dataTransfer;
+  if(dt && Array.from(dt.types||[]).includes('Files')){ ev.preventDefault(); el.classList.add('note-dropping'); }
 }
 function pickNoteImage(btn){
   const el=document.createElement('input');
@@ -3640,6 +3665,24 @@ function removeImage(btn, id){
   document.querySelectorAll('#m-body .note-txt').forEach(autoGrow);
   toast('Picture removed');
 }
+/* pasting into the compose box makes a new dated note and puts the picture in it */
+async function composeAttach(ev, inp){
+  const dt = ev.clipboardData || ev.dataTransfer;
+  if(!dt) return;
+  let file=null;
+  if(dt.items){ for(const it of dt.items){ if(it.kind==='file' && /^image\//.test(it.type||'')){ file=it.getAsFile(); break; } } }
+  if(!file && dt.files && dt.files.length && /^image\//.test(dt.files[0].type||'')) file=dt.files[0];
+  if(!file) return;
+  ev.preventDefault();
+  const h=notesHolder(inp);
+  if(!String(inp.value||'').trim()) inp.value='Screenshot';
+  addDatedNote(inp);
+  const cards=h.querySelectorAll('.note-card');
+  const last=cards[cards.length-1];
+  if(last) await attachImage(last.querySelector('.note-txt'), file);
+}
+function composePaste(ev, inp){ composeAttach(ev, inp); }
+function composeDrop(ev, inp){ inp.classList.remove('note-dropping'); composeAttach(ev, inp); }
 function stampNote(){
   const d=new Date(), p=n=>String(n).padStart(2,'0');
   return fmtDate(today())+' · '+p(d.getHours())+':'+p(d.getMinutes());
