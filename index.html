@@ -4757,16 +4757,67 @@ function ensureTaskOrders(){
   S.tasks.forEach(t=>{ while(t.length<12) t.push(''); });
   startAlarms();
   /* if sync is set up, pull whatever the other device pushed, so the phone is never stale */
-  if(syncCfg().token && syncCfg().gist && (syncCfg().auto!==false)) setTimeout(()=>doSync(), 900);
+  try{ if(navigator.storage && navigator.storage.persist) navigator.storage.persist(); }catch(e){}
+  (async ()=>{
+    const fromUrl=readSetupFromUrl();
+    if(fromUrl && !syncCfg().token){
+      try{
+        const o=JSON.parse(decodeURIComponent(escape(atob(fromUrl.slice(9)))));
+        if(o && o.t){
+          saveSyncCfg({token:o.t, gist:o.g||''});
+          setTimeout(()=>toast('Reconnected from your shortcut link. Pulling your data…'), 600);
+        }
+      }catch(e){}
+    } else if(!syncCfg().token){
+      const back=await recoverSyncCfg();
+      if(back) setTimeout(()=>toast('Sync settings recovered on this device'), 600);
+    }
+    const c=syncCfg();
+    if(c.token && (c.auto!==false)) setTimeout(()=>doSync(), 900);
+  })();
 })();
 /* ================= CLOUD SYNC via private GitHub Gist ================= */
 const SYNC_CFG_KEY = 'spechub3_sync_cfg';   // token + gist id live in localStorage, NOT in the synced data
 const SYNC_FILE = 'fischer_spec_hub_data.json';
 
-function syncCfg(){
-  try{ return JSON.parse(localStorage.getItem(SYNC_CFG_KEY)) || {}; }catch(e){ return {}; }
+/* iOS clears a home-screen app's storage after a few days of not opening it, which
+   takes the token and Gist ID with it. The config is therefore kept in three places:
+   localStorage, this file's own storage, and a long-life cookie. If any one survives,
+   the connection comes back by itself. The shortcut URL is the final fallback. */
+let _cfgCache=null;
+function cookieGet(k){
+  try{ const m=document.cookie.match(new RegExp('(^| )'+k+'=([^;]+)')); return m?decodeURIComponent(m[2]):null; }catch(e){ return null; }
 }
-function saveSyncCfg(c){ localStorage.setItem(SYNC_CFG_KEY, JSON.stringify(c)); }
+function cookieSet(k,v){
+  try{ document.cookie=k+'='+encodeURIComponent(v)+'; path=/; max-age=31536000; SameSite=Lax'; }catch(e){}
+}
+function syncCfg(){
+  if(_cfgCache) return _cfgCache;
+  let c=null;
+  try{ c=JSON.parse(localStorage.getItem(SYNC_CFG_KEY)); }catch(e){}
+  if(!c || !c.token){ try{ const v=cookieGet('spechub_sync'); if(v) c=JSON.parse(v); }catch(e){} }
+  if(!c || !c.token){ try{ const v=window.__syncCfgBackup; if(v) c=v; }catch(e){} }
+  _cfgCache = c || {};
+  return _cfgCache;
+}
+function saveSyncCfg(c){
+  _cfgCache=c||{};
+  const s=JSON.stringify(_cfgCache);
+  try{ localStorage.setItem(SYNC_CFG_KEY, s); }catch(e){}
+  cookieSet('spechub_sync', s);
+  window.__syncCfgBackup=_cfgCache;
+  if(window.storage){ try{ window.storage.set('spechub3:__sync', s); }catch(e){} }
+}
+async function recoverSyncCfg(){
+  if(syncCfg().token) return false;
+  if(window.storage){
+    try{
+      const r=await window.storage.get('spechub3:__sync');
+      if(r && r.value){ const c=JSON.parse(r.value); if(c && c.token){ saveSyncCfg(c); return true; } }
+    }catch(e){}
+  }
+  return false;
+}
 
 function snapshot(){
   const o={_v:3, _savedAt:Date.now(), _lastEdit:(S.meta&&S.meta.lastEdit)||0};
@@ -4790,6 +4841,38 @@ async function copySetupCode(){
   if(!code){ toast('Connect on this device first', true); return; }
   await copyText(code, 'setup code');
   toast('Setup code copied. Email it to yourself, then paste it on the phone.');
+}
+function phoneLink(){
+  const code=setupCode();
+  if(!code) return '';
+  const base=location.origin+location.pathname;
+  return base+'#k='+encodeURIComponent(code);
+}
+async function copyPhoneLink(){
+  const url=phoneLink();
+  if(!url){ toast('Connect this device first', true); return; }
+  await copyText(url,'phone link');
+  document.getElementById('m-title').textContent='Link for your phone';
+  document.getElementById('m-body').innerHTML=`
+    <div class="mini-note" style="line-height:1.8">This address carries your token and Gist ID inside it. Open it on the phone and add <b>that</b> to the home screen: if iOS ever clears the app's storage, opening the icon reconnects and pulls your data by itself, with nothing to type.
+    <br><br><b>On the phone</b><br>
+    1 · Send yourself this link and open it in <b>Safari</b><br>
+    2 · Wait for it to say it is connected<br>
+    3 · Delete the old Spec Hub icon, hold it and choose Remove Bookmark<br>
+    4 · Share → <b>Add to Home Screen</b> → Add
+    <br><br><span class="due-late">Treat the link like a password.</span> Anyone who opens it can reach your Gist. If it leaks, delete the token on GitHub and make a new one.</div>
+    <div style="margin-top:10px"><input value="${esc(url)}" readonly style="width:100%;font-size:11.5px" onclick="this.select()"></div>`;
+  document.getElementById('m-foot').innerHTML=`<button class="btn" onclick="closeModal()">Close</button>
+    <button class="btn primary" onclick="copyText('${esc(url)}','phone link')">📋 Copy again</button>`;
+  document.getElementById('modal-back').classList.add('open');
+}
+function readSetupFromUrl(){
+  try{
+    const h=String(location.hash||'');
+    const m=h.match(/[#&]k=([^&]+)/);
+    if(!m) return null;
+    return decodeURIComponent(m[1]);
+  }catch(e){ return null; }
 }
 function applySetupCode(raw){
   const s=String(raw||'').trim();
@@ -4839,7 +4922,8 @@ function openSync(){
         <div class="mini-note" style="margin-top:7px">Both devices are joined when these two values match. Compare them on the phone, they must be identical.</div>
       </div>
       <div style="display:flex;gap:7px;flex-wrap:wrap;margin-bottom:11px">
-        <button class="btn sm navy" onclick="copySetupCode()">📋 Copy setup code for my phone</button>
+        <button class="btn sm navy" onclick="copyPhoneLink()">📱 Make a phone link that cannot disconnect</button>
+        <button class="btn sm" onclick="copySetupCode()">📋 Copy setup code</button>
         <button class="btn sm" onclick="copyText(syncCfg().gist||'','Gist ID')">Copy Gist ID</button>
         <button class="btn sm" onclick="inspectRemote()">🔍 What is in the cloud?</button>
       </div>
@@ -4994,7 +5078,8 @@ async function doSync(firstTime){
         <div class="mini-note" style="margin-top:10px">Easiest way to set up the phone: copy the setup code below, email it to yourself, open the hub on the phone, press Sync and paste it into the setup code box.</div>`;
       document.getElementById('m-foot').innerHTML=`
         <button class="btn" onclick="closeModal()">Close</button>
-        <button class="btn primary" onclick="copySetupCode()">📋 Copy setup code</button>`;
+        <button class="btn" onclick="copySetupCode()">📋 Copy setup code</button>
+        <button class="btn primary" onclick="copyPhoneLink()">📱 Make a phone link</button>`;
       document.getElementById('modal-back').classList.add('open');
       _syncing=false; if(btn) btn.style.opacity='1'; return;
     }
