@@ -3225,6 +3225,13 @@ function parseDocName(name){
   const base=String(name).replace(/\.[a-z0-9]+$/i,'');
   let date='';
   const pats=[
+    [/(\d{1,2})[.\-_ ]([A-Za-z]{3,9})[.\-_ ](\d{4})/, (m)=>{
+        const mo={jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12}[m[2].slice(0,3).toLowerCase()];
+        return mo? m[3]+'-'+String(mo).padStart(2,'0')+'-'+m[1].padStart(2,'0') : ''; }],
+    [/([A-Za-z]{3,9})[.\-_ ](\d{1,2})[.\-_ ](\d{4})/, (m)=>{
+        const mo={jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12}[m[1].slice(0,3).toLowerCase()];
+        return mo? m[3]+'-'+String(mo).padStart(2,'0')+'-'+m[2].padStart(2,'0') : ''; }],
+    [/(\d{2})(\d{2})(\d{4})(?!\d)/, (m)=>m[3]+'-'+m[2]+'-'+m[1]],
     [/(\d{4})[.\-_/](\d{1,2})[.\-_/](\d{1,2})/, (m)=>m[1]+'-'+m[2].padStart(2,'0')+'-'+m[3].padStart(2,'0')],
     [/(\d{1,2})[.\-_/](\d{1,2})[.\-_/](\d{4})/, (m)=>m[3]+'-'+m[2].padStart(2,'0')+'-'+m[1].padStart(2,'0')],
     [/(\d{1,2})\s*([A-Za-z]{3,})\s*(\d{4})/, (m)=>{
@@ -3234,7 +3241,18 @@ function parseDocName(name){
         const mo={january:1,february:2,march:3,april:4,may:5,june:6,july:7,august:8,september:9,october:10,november:11,december:12}[m[1].toLowerCase()];
         return mo? m[2]+'-'+String(mo).padStart(2,'0')+'-28' : ''; }]
   ];
-  for(const [re,fn] of pats){ const m=base.match(re); if(m){ const v=fn(m); if(isDateStr(v)){ date=v; break; } } }
+  /* try every candidate a pattern finds, not just the first: a long reference number
+     ahead of the date can otherwise produce a false match such as 7524-76-06 */
+  for(const [re,fn] of pats){
+    const g=new RegExp(re.source, 'gi');
+    let m, best='';
+    while((m=g.exec(base))!==null){
+      const v=fn(m);
+      if(isDateStr(v)){ best=v; break; }
+      if(m.index===g.lastIndex) g.lastIndex++;
+    }
+    if(best){ date=best; break; }
+  }
   const nums=(base.match(/\b\d{6,15}\b/g)||[]).filter(n=>!date||!date.replace(/-/g,'').includes(n));
   const low=base.toLowerCase();
   let guess='';
@@ -3285,7 +3303,7 @@ function scanDocFiles(files){
   }).sort((a,b)=>a.doc.localeCompare(b.doc));
   showScanGroups();
 }
-function pickScanVersion(gi, i){ _scanGroups[gi].pick=i; showScanGroups(); }
+function pickScanVersion(gi, i){ _scanGroups[gi].pick=i; showScanGroups(); scanPreview(); }
 function showScanGroups(){
   const fields=S.regdocs.filter(r=>r[RD.CAT]==='Licenses & Registrations');
   const td=today();
@@ -3309,35 +3327,80 @@ function showScanGroups(){
               </div>
               <span class="pill ${!r.date?'p-grey':(expired?'p-red':'p-green')}">${r.date?(expired?'expired '+fmtDate(r.date):'valid to '+fmtDate(r.date)):'no date'}</span>
             </label>`;}).join('')}
-          <div style="display:flex;gap:8px;align-items:center;margin-top:7px">
-            <span class="cell-sub" style="width:70px">Apply to</span>
-            <select class="sg-fld" data-gi="${gi}" style="flex:1;font-size:11.5px">
+          <div style="display:grid;grid-template-columns:70px 1fr;gap:8px;align-items:center;margin-top:8px">
+            <span class="cell-sub">Apply to</span>
+            <select class="sg-fld" data-gi="${gi}" style="font-size:11.5px" onchange="scanPreview()">
               <option value="">— skip this document —</option>
               ${fields.map(f=>`<option ${f[RD.FIELD]===g.doc?'selected':''}>${esc(f[RD.FIELD])}</option>`).join('')}
             </select>
+            <span class="cell-sub">New expiry</span>
+            <input type="date" class="sg-date" data-gi="${gi}" value="${esc((_scanned[g.pick]||{}).date||'')}" style="font-size:11.5px" onchange="scanPreview()">
+            <span class="cell-sub">New number</span>
+            <input type="text" class="sg-num" data-gi="${gi}" value="${esc(((_scanned[g.pick]||{}).nums||[])[0]||'')}" placeholder="leave empty to keep the current number" style="font-size:11.5px" onchange="scanPreview()">
           </div>
+          <div class="sg-prev" data-gi="${gi}" style="margin-top:6px"></div>
         </div>`).join('')}
       </div>`;
   document.getElementById('m-foot').innerHTML=`<button class="btn" onclick="closeModal()">Cancel</button>
     ${_scanGroups.length?`<button class="btn primary" onclick="applyDocScan()">Apply the ticked versions</button>`:''}`;
   document.getElementById('modal-back').classList.add('open');
+  setTimeout(scanPreview, 30);
+}
+/* show what each line will actually change, before anything is written */
+function scanPreview(){
+  const td=today();
+  [...document.querySelectorAll('.sg-prev')].forEach(box=>{
+    const gi=+box.dataset.gi;
+    const sel=document.querySelector('.sg-fld[data-gi="'+gi+'"]');
+    const din=document.querySelector('.sg-date[data-gi="'+gi+'"]');
+    const nin=document.querySelector('.sg-num[data-gi="'+gi+'"]');
+    if(!sel || !sel.value){ box.innerHTML='<span class="cell-sub">nothing will change for this document</span>'; return; }
+    const rec=S.regdocs.find(r=>r[RD.FIELD]===sel.value);
+    if(!rec){ box.innerHTML=''; return; }
+    const bits=[];
+    const nd=din && din.value;
+    if(nd && nd!==String(rec[RD.VALID]||'')){
+      const wasExp=rec[RD.VALID] && String(rec[RD.VALID])<td;
+      bits.push('expiry <b class="'+(wasExp?'due-late':'')+'">'+(rec[RD.VALID]?fmtDate(rec[RD.VALID]):'none')+'</b> → <b style="color:'+(nd>=td?'var(--green)':'var(--red)')+'">'+fmtDate(nd)+'</b>');
+    }
+    const nn=nin && nin.value.trim();
+    if(nn && nn!==String(rec[RD.VAL]||'')) bits.push('number <b>'+esc(rec[RD.VAL])+'</b> → <b>'+esc(nn)+'</b>');
+    box.innerHTML = bits.length
+      ? '<div style="font-size:11.5px;background:#EFF6FF;border-radius:6px;padding:5px 8px">'+esc(sel.value)+': '+bits.join(' · ')+'</div>'
+      : '<span class="cell-sub">'+esc(sel.value)+' already holds these values, nothing to change</span>';
+  });
 }
 function applyDocScan(){
-  let n=0, notes=[];
+  let changed=[], skipped=[];
   [...document.querySelectorAll('.sg-fld')].forEach(sel=>{
-    const field=sel.value; if(!field) return;
-    const g=_scanGroups[+sel.dataset.gi]; if(!g) return;
-    const chosen=_scanned[g.pick]; if(!chosen) return;
-    const rec=S.regdocs.find(r=>r[RD.FIELD]===field); if(!rec) return;
-    if(chosen.date){ rec[RD.VALID]=chosen.date; }
-    if(chosen.nums.length){ rec[RD.VAL]=chosen.nums[0]; }
-    rec[RD.NOTE]='from '+chosen.file;
-    notes.push(field+' ← '+chosen.file);
-    n++;
+    const gi=+sel.dataset.gi;
+    const field=sel.value;
+    const g=_scanGroups[gi];
+    if(!g) return;
+    if(!field){ skipped.push(g.doc); return; }
+    const rec=S.regdocs.find(r=>r[RD.FIELD]===field);
+    if(!rec){ skipped.push(field); return; }
+    const din=document.querySelector('.sg-date[data-gi="'+gi+'"]');
+    const nin=document.querySelector('.sg-num[data-gi="'+gi+'"]');
+    const nd=din && din.value;
+    const nn=nin && nin.value.trim();
+    let did=false;
+    if(nd && nd!==String(rec[RD.VALID]||'')){ changed.push(field+': expiry '+(rec[RD.VALID]||'none')+' → '+nd); rec[RD.VALID]=nd; did=true; }
+    if(nn && nn!==String(rec[RD.VAL]||'')){ changed.push(field+': number '+rec[RD.VAL]+' → '+nn); rec[RD.VAL]=nn; did=true; }
+    if(did) rec[RD.NOTE]='from '+((_scanned[g.pick]||{}).file||'scan');
+    else skipped.push(field+' (already up to date)');
   });
-  if(n){ save('regdocs'); logChange(n+' document(s) updated from the scan: '+notes.join(' · ').slice(0,120), 'Documents'); }
+  if(changed.length){ save('regdocs'); logChange(changed.join(' · ').slice(0,200), 'Documents'); }
   closeModal(); refreshTab();
-  toast(n? n+' document(s) updated from the files you ticked' : 'Nothing was applied');
+  if(changed.length){
+    document.getElementById('m-title').textContent='Updated '+changed.length+' item(s)';
+    document.getElementById('m-body').innerHTML=changed.map(c=>'<div style="padding:5px 0;border-bottom:1px solid #EEF1F6;font-size:12.5px">'+esc(c)+'</div>').join('')
+      + (skipped.length?'<div class="mini-note" style="margin-top:9px">Left alone: '+esc(skipped.join(', '))+'</div>':'');
+    document.getElementById('m-foot').innerHTML='<button class="btn primary" onclick="closeModal()">Done</button>';
+    document.getElementById('modal-back').classList.add('open');
+  } else {
+    toast('Nothing changed. Check that a field is chosen and the new expiry is filled in.', true);
+  }
 }
 function openRegdocForm(id){
   const r=id?S.regdocs.find(x=>x[RD.ID]===id):null;
