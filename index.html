@@ -856,7 +856,7 @@ const FLT = {
   contacts:{year:curYear(), q:''},
   seminars:{year:curYear(), q:'', sbu:''},
   tracking:{handler:'Bakr Mohamed', prio:'', q:''},
-  projects:{q:'', sbu:'', flagOnly:false, year:curYear(), locked:true},
+  projects:{q:'', sbu:'', flagOnly:false, year:curYear(), locked:true, wide:false},
   vendors:{q:''},
   tasks:{q:'', hideDone:true, label:'', sort:'manual', view:'board', hideComments:false}
 };
@@ -896,6 +896,7 @@ function kpiTargets(){
 /* a specification counts as converted once a PO is released, whether invoiced
    in full or only partially */
 function poReleased(p){
+  if(String(p[PF.PO])===PO_CANCEL) return false;
   if(String(p[PF.PO]).toLowerCase()==='yes') return true;
   const inv=String(p[PF.INV]||'').toLowerCase();
   return inv==='total' || inv==='partially';
@@ -2287,6 +2288,7 @@ function _selCellLive(sl, field, val, opts){
     ${['',...opts.filter(o=>o!=='')].map(o=>`<option value="${esc(o)}" ${String(val)===String(o)?'selected':''}>${esc(o)||'—'}</option>`).join('')}</select></td>`;
 }
 function renderProjects(){
+  const wide = !!(FLT.projects && FLT.projects.wide);
   const f=FLT.projects;
   const searching = !!f.q.trim();
   let rows=S.projects.filter(p=>(!f.sbu||p[PF.SBU]===f.sbu)&&(!f.flagOnly||p[PF.FLAG]));
@@ -2319,29 +2321,32 @@ function renderProjects(){
     <span class="chip-row" style="gap:4px"><button class="btn sm" onclick="nudgeProj(-420)" title="Scroll columns left">◀</button><button class="btn sm" onclick="nudgeProj(420)" title="Scroll columns right">▶</button></span>
     <button class="btn sm" onclick="openTeamManager()" title="Sales colleagues, their positions and emails">👥 Sales team</button>
     ${(()=>{const g=projectCompanyGaps().length; return g?`<button class="btn sm" style="border-color:var(--red);color:var(--red)" onclick="openProjectLinker()" title="Consultants and clients that are not in your contacts or Team Tracking">⚠ Not linked: ${g}</button>`:'';})()}
+    <button class="chip ${wide?'on':''}" onclick="FLT.projects.wide=!FLT.projects.wide;renderProjects()" title="Contractor, Status, City, Invoiced, Inv. value and Sales">${wide?'▤ Fewer columns':'▦ All columns'}</button>
     <button class="btn sm" onclick="exportSheet('projects')">Export sheet</button>
     <button class="btn primary sm" onclick="openProjectForm()">+ Add project</button>
   </div>
   ${consDatalist()}
-  <div class="tbl-wrap proj ${pLocked()?'':'editing'}" id="proj-wrap"><table class="tbl" style="min-width:1180px">
-    <thead><tr><th title="Show in meeting slides">Slide</th><th>#</th><th>Project</th><th style="width:150px">Project type</th><th>Consultant / Client</th><th>Contractor</th><th>Status</th><th>City</th><th>Application</th><th>SBU</th><th>Expected (SAR)</th><th>PO?</th><th>Invoiced</th><th>Inv. value</th><th>Sales</th><th>Project Year</th><th></th></tr></thead>
+  <div class="tbl-wrap proj ${pLocked()?'':'editing'}" id="proj-wrap"><table class="tbl" style="min-width:${wide?'1180px':'860px'}">
+    <thead><tr><th title="Show in meeting slides">Slide</th><th>#</th><th>Project</th><th style="width:150px">Project type</th><th>Consultant / Client</th>${wide?'<th>Contractor</th><th>Status</th><th>City</th>':''}<th>Application</th><th>SBU</th><th>Expected (SAR)</th><th>PO?</th>${wide?'<th>Invoiced</th><th>Inv. value</th><th>Sales</th>':''}<th>Project Year</th><th></th></tr></thead>
     <tbody>${rows.map(p=>`
-      <tr class="${p[PF.STATUS]==='Canceled'?'row-cancel':''}">
+      <tr class="${(p[PF.STATUS]==='Canceled'||p[PF.PO]===PO_CANCEL)?'row-cancel':''}">
         <td style="text-align:center"><input type="checkbox" class="inline-flag" ${p[PF.FLAG]?'checked':''} ${pLocked()?'disabled title="Unlock with ✏ Edit cells to change"':'title="Include in Leads slides"'} onchange="toggleFlag(${p[PF.SL]})"></td>
         <td class="num">${p[PF.SL]}${p[PF.TYPE]==='Sales Lead'?'<div><span class="tag-lead">LEAD</span></div>':''}</td>
-        ${edCell(p[PF.SL],PF.PROJ,p[PF.PROJ],'font-weight:700;min-width:150px')}
+        ${wide ? edCell(p[PF.SL],PF.PROJ,p[PF.PROJ],'font-weight:700;min-width:150px')
+               : `<td style="min-width:190px"><div class="cell-main" dir="auto">${esc(p[PF.PROJ])}</div>
+                  <div class="cell-sub">${[p[PF.CONTR],p[PF.STATUS],p[PF.CITY],p[PF.SALES]].filter(x=>x&&x!=='-').join(' · ')}${(+p[PF.INVVAL]||0)?' · invoiced '+fmtSAR(+p[PF.INVVAL]):''}</div></td>`}
         ${selCell(p[PF.SL],PF.TYPE,p[PF.TYPE],['','Sales Lead','Specifications converted'])}
         ${consCell(p)}
-        ${edCell(p[PF.SL],PF.CONTR,p[PF.CONTR],'min-width:90px')}
+        ${wide?`${edCell(p[PF.SL],PF.CONTR,p[PF.CONTR],'min-width:90px')}
         ${selCell(p[PF.SL],PF.STATUS,p[PF.STATUS],O.projStatus)}
-        ${selCell(p[PF.SL],PF.CITY,p[PF.CITY],O.cities)}
+        ${selCell(p[PF.SL],PF.CITY,p[PF.CITY],O.cities)}`:''}
         ${edCell(p[PF.SL],PF.APP,p[PF.APP],'min-width:140px;font-size:12px')}
         ${selCell(p[PF.SL],PF.SBU,p[PF.SBU],O.sbu)}
         ${edCell(p[PF.SL],PF.EXP,p[PF.EXP],'text-align:right;font-weight:700;min-width:86px',1)}
-        ${selCell(p[PF.SL],PF.PO,p[PF.PO],['Yes','No','-'])}
-        ${selCell(p[PF.SL],PF.INV,p[PF.INV],O.invoiced)}
+        ${poCell(p)}
+        ${wide?`${selCell(p[PF.SL],PF.INV,p[PF.INV],O.invoiced)}
         ${edCell(p[PF.SL],PF.INVVAL,p[PF.INVVAL],'text-align:right;min-width:76px',1)}
-        ${salesCell(p)}
+        ${salesCell(p)}`:''}
         ${selCell(p[PF.SL],PF.YEAR,p[PF.YEAR],[curYear(),prevYear(),String(+curYear()-2)])}
         <td class="row-actions">
           ${projectEmailDraft(p)?`<button class="icon-btn" onclick="openProjectEmail(${p[PF.SL]})" title="Email ${esc(p[PF.SALES])} about this project">✉</button>`:`<button class="icon-btn" style="opacity:.35" onclick="toast('Assign a sales colleague with an email first (👥 Sales team)',true)" title="No email on file">✉</button>`}
@@ -2367,6 +2372,50 @@ function companyIsKnown(name){
   return S.tracking.some(k=>namesLikelySame(n, k[KF.CONS]))
       || S.contacts.some(c=>namesLikelySame(n, c[CF.COMPANY]))
       || S.vendors.some(v=>namesLikelySame(n, v[VF.COMPANY]));
+}
+/* PO can be Canceled, and a cancelled order needs a reason on the record */
+const PO_CANCEL='Canceled';
+function poCell(p){
+  const v=String(p[PF.PO]||'');
+  const cancelled = v===PO_CANCEL;
+  if(pLocked()) return `<td class="locked" style="white-space:nowrap">${esc(v)}${cancelled&&p[PF.PLAN]?`<div class="cell-sub">${esc(String(p[PF.PLAN]).replace(/^Cancelled:\s*/,''))}</div>`:''}</td>`;
+  return `<td style="white-space:nowrap">
+    <select class="cell-sel" onwheel="this.blur()" onchange="setProjPO(${p[PF.SL]}, this.value)">
+      ${['Yes','No','-',PO_CANCEL].map(o=>`<option ${v===o?'selected':''}>${esc(o)}</option>`).join('')}
+    </select>
+    ${cancelled?`<div><button class="btn sm" style="padding:1px 7px;font-size:10.5px;border-color:var(--red);color:var(--red)" onclick="askCancelReason(${p[PF.SL]})">${p[PF.PLAN]?'reason ✎':'add reason'}</button></div>`:''}
+  </td>`;
+}
+async function setProjPO(sl, val){
+  setProjField(sl, PF.PO, val);
+  if(val===PO_CANCEL) askCancelReason(sl);
+  else refreshTab();
+}
+function askCancelReason(sl){
+  const p=S.projects.find(x=>x[PF.SL]===sl);
+  if(!p) return;
+  const cur=String(p[PF.PLAN]||'').replace(/^Cancelled:\s*/,'');
+  document.getElementById('m-title').textContent='Why was it cancelled?';
+  document.getElementById('m-body').innerHTML=`
+    <div class="mini-note" style="margin-bottom:8px">${esc(p[PF.PROJ]||'This project')} — the reason is kept on the row and appears in the follow-up email.</div>
+    <textarea id="cx-why" style="min-height:110px;width:100%" placeholder="for example: client awarded to a competitor on price, or the package was postponed">${esc(cur)}</textarea>
+    <div class="mini-note" style="margin-top:6px">Common reasons: price, lead time, competitor specified, package on hold, scope removed.</div>`;
+  document.getElementById('m-foot').innerHTML=`
+    <button class="btn" onclick="closeModal()">Cancel</button>
+    <button class="btn primary" onclick="saveCancelReason(${sl})">Save reason</button>`;
+  document.getElementById('modal-back').classList.add('open');
+  setTimeout(()=>{const t=document.getElementById('cx-why'); if(t) t.focus();},60);
+}
+function saveCancelReason(sl){
+  const p=S.projects.find(x=>x[PF.SL]===sl);
+  const v=String((document.getElementById('cx-why')||{}).value||'').trim();
+  if(p){
+    p[PF.PLAN]= v ? 'Cancelled: '+v : '';
+    save('projects');
+    logChange('PO cancelled on "'+(p[PF.PROJ]||'row '+sl)+'"'+(v?': '+v:''), 'Projects');
+  }
+  closeModal(); refreshTab();
+  toast(v?'Reason saved':'Reason cleared');
 }
 function consCell(p){
   const v=String(p[PF.CONS]||'');
@@ -2421,9 +2470,14 @@ function projectEmailDraft(p){
     'Expected PO value: '+((+p[PF.EXP]||0)?fmtSAR(+p[PF.EXP]):'-'),
     'Project status: '+(p[PF.STATUS]||'-')
   ];
-  if(p[PF.SUPD]) lines.push('', 'Specification update: '+p[PF.SUPD]);
+  if(p[PF.PO]) lines.push('PO issued: '+p[PF.PO]);
+  if(p[PF.SUPD]) lines.push('Specification update: '+p[PF.SUPD]);
   if(p[PF.PLAN]) lines.push('Action plan: '+p[PF.PLAN]);
-  lines.push('', 'Could you please share the latest commercial status so we can plan the next step?','',
+  lines.push('', 'Could you please confirm the following:','',
+             '• The latest commercial status and whether the PO has moved',
+             '• Whether the specified fischer system is still the one being used',
+             '• Anything you need from my side, drawings, calculations or a site visit',
+             '', 'Thank you.','',
              'Best regards,','Mohamed Bakr','Sr. Specification Engineer, fischer Saudi Arabia');
   return { to: t[TM.EMAIL],
            subject: 'fischer | '+(p[PF.PROJ]||'Project')+' - '+(p[PF.SBU]||'follow-up'),
@@ -2469,7 +2523,20 @@ function buildOwaCompose(to,subject,body){
 }
 async function openOutlookWeb(){
   const f=_emFields();
-  const url=buildOwaCompose(f.to,f.subject,f.body);
+  /* an Outlook Web compose link can only carry plain text, so put the formatted
+     version on the clipboard first: one Ctrl+V in the message area and it is there */
+  let rich=false;
+  try{
+    if(navigator.clipboard && window.ClipboardItem){
+      await navigator.clipboard.write([new ClipboardItem({
+        'text/html': new Blob([emailHtml(f.body, FISCHER_LOGO_POS)], {type:'text/html'}),
+        'text/plain': new Blob([f.body], {type:'text/plain'})
+      })]);
+      rich=true;
+    }
+  }catch(e){}
+  const url=buildOwaCompose(f.to, f.subject, rich?'':f.body);
+  if(rich) toast('Formatted message copied. In the Outlook tab, click in the message area and press Ctrl+V.');
   let w=null;
   try{ w=window.open(url,'_blank','noopener'); }catch(e){}
   if(w){ toast('Opening Outlook Web with the message ready.'); return; }
@@ -2522,11 +2589,22 @@ function bodyHtml(text){
     .replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" style="color:rgb(5,99,193)">$1</a>')
     .replace(/([\w.\-]+@[\w.\-]+\.\w+)/g, '<a href="mailto:$1" style="color:rgb(5,99,193)">$1</a>');
   const out=[];
-  let bullets=[];
-  const flush=()=>{ if(bullets.length){ out.push('<ul style="margin:0 0 16px;padding-left:22px">'+bullets.map(b=>`<li style="${A}margin-bottom:6px">${linkify(b)}</li>`).join('')+'</ul>'); bullets=[]; } };
+  let bullets=[], rows=[];
+  const flushRows=()=>{
+    if(rows.length<2){ rows.forEach(r=>out.push(`<p style="${A}text-align:left;margin:0 0 6px;">${linkify(r[0]+': '+r[1])}</p>`)); rows=[]; return; }
+    out.push('<table cellspacing="0" cellpadding="0" border="0" style="border-collapse:collapse;margin:0 0 16px;width:100%;max-width:560px">'
+      + rows.map((r,i)=>`<tr style="background:${i%2?'#F7F9FC':'#fff'}">
+          <td style="${A}padding:7px 10px;border:1px solid #E3E8EF;font-weight:700;width:38%;vertical-align:top">${linkify(r[0])}</td>
+          <td style="${A}padding:7px 10px;border:1px solid #E3E8EF;vertical-align:top">${linkify(r[1])}</td></tr>`).join('')
+      + '</table>');
+    rows=[];
+  };
+  const flush=()=>{ flushRows(); if(bullets.length){ out.push('<ul style="margin:0 0 16px;padding-left:22px">'+bullets.map(b=>`<li style="${A}margin-bottom:6px">${linkify(b)}</li>`).join('')+'</ul>'); bullets=[]; } };
   String(text||'').split(/\n/).forEach(raw=>{
     const line=raw.replace(/\s+$/,'');
-    if(/^\s*[•\-\*]\s+/.test(line)){ bullets.push(line.replace(/^\s*[•\-\*]\s+/,'')); return; }
+    if(/^\s*[•\-\*]\s+/.test(line)){ flushRows(); bullets.push(line.replace(/^\s*[•\-\*]\s+/,'')); return; }
+    const kv=line.match(/^([A-Za-z][^:]{1,40}):\s+(.+)$/);
+    if(kv){ if(bullets.length) flush(); rows.push([kv[1].trim(), kv[2].trim()]); return; }
     flush();
     if(!line.trim()){ return; }
     const bold=/^(Dear |Thank you|Best regards|Kind regards)/i.test(line.trim());
@@ -2557,7 +2635,7 @@ function openEmailDraft(to, subject, body, title){
         ${Object.entries(OWA_HOSTS).map(([k,v])=>`<option value="${k}" ${owaHostKey()===k?'selected':''}>${esc(v.label)}</option>`).join('')}
       </select></div>
     <div class="mini-note" style="margin-top:8px;line-height:1.6">
-      <b>Outlook Web</b> opens a new tab in your mailbox with this message already composed. If the tab is blocked, the link is copied so you can paste it.<br>
+      <b>Outlook Web</b> can only receive plain text through a link, so the hub copies the <b>formatted</b> version to your clipboard and opens the tab with the address and subject filled in: click in the message area and press <b>Ctrl+V</b>.<br>
       <b>⬇ Download draft</b> saves an <b>.eml</b> file carrying the fischer signature and logo: double-click it and Outlook opens the message ready to send. <b>Copy</b> puts the same formatted version on the clipboard.
       ${IS_EMBEDDED?'<br>Direct <i>mailto</i> links are blocked in this preview window, so that button only appears when you open the hub file or your web link directly.':''}
     </div>`;
@@ -2812,7 +2890,7 @@ function openProjectForm(sl){
     {k:PF.APP,label:'Application',type:'text',full:1},
     {k:PF.SBU,label:'SBU',type:'select',opts:O.sbu,full:1},
     {k:PF.EXP,label:'Expected PO value (SAR)',type:'number'},{k:PF.INVVAL,label:'Invoiced value (SAR)',type:'number'},
-    {k:PF.PO,label:'PO issued?',type:'select',opts:['','Yes','No','-']},
+    {k:PF.PO,label:'PO issued?',type:'select',opts:['','Yes','No','-','Canceled']},
     {k:PF.INV,label:'Invoiced?',type:'select',opts:['','Total','Partially','Not Yet']},
     {k:PF.SALES,label:'Assigned sales',type:'select',opts:[''].concat(salesOptions())},
     {k:PF.TYPE,label:'Type',type:'select',opts:['','Sales Lead','Specifications converted']},
