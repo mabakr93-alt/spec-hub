@@ -2190,9 +2190,10 @@ function trackConRowHTML(c){
 }
 function addTrackBU(){ document.getElementById('tk-bus').insertAdjacentHTML('beforeend', trackBURowHTML(['Fixings','0','No','No','No'])); }
 function addTrackContact(){ document.getElementById('tk-cons').insertAdjacentHTML('beforeend', trackConRowHTML(['','',''])); }
-function openTrackForm(id){
+function openTrackForm(id, presetName){
   const k = id ? S.tracking.find(x=>x[KF.ID]===id) : null;
-  const d = k ? clone(k) : [nextId(S.tracking),'','B','Consultant','Bakr Mohamed',[['Fixings','0','No','No','No']],[],['','',''],''];
+  const d = k ? clone(k) : [nextId(S.tracking), presetName||'', 'B','Consultant','Bakr Mohamed',
+      TRACK_MAIN_BUS.map(b=>[b,'0','No','No','No']), [], ['','',''], '', ''];
   document.getElementById('m-title').textContent = k?'Edit consultant — '+k[KF.CONS]:'New consultant';
   document.getElementById('m-body').innerHTML = `
     <div class="f-grid">
@@ -2317,17 +2318,20 @@ function renderProjects(){
     ${_projUndo?`<button class="btn sm" onclick="undoProjEdit()" title="Undo: ${esc(_projUndo.label)}">↩ Undo</button>`:''}
     <span class="chip-row" style="gap:4px"><button class="btn sm" onclick="nudgeProj(-420)" title="Scroll columns left">◀</button><button class="btn sm" onclick="nudgeProj(420)" title="Scroll columns right">▶</button></span>
     <button class="btn sm" onclick="openTeamManager()" title="Sales colleagues, their positions and emails">👥 Sales team</button>
+    ${(()=>{const g=projectCompanyGaps().length; return g?`<button class="btn sm" style="border-color:var(--red);color:var(--red)" onclick="openProjectLinker()" title="Consultants and clients that are not in your contacts or Team Tracking">⚠ Not linked: ${g}</button>`:'';})()}
     <button class="btn sm" onclick="exportSheet('projects')">Export sheet</button>
     <button class="btn primary sm" onclick="openProjectForm()">+ Add project</button>
   </div>
+  ${consDatalist()}
   <div class="tbl-wrap proj ${pLocked()?'':'editing'}" id="proj-wrap"><table class="tbl" style="min-width:1180px">
-    <thead><tr><th title="Show in meeting slides">Slide</th><th>#</th><th>Project</th><th>Consultant</th><th>Contractor</th><th>Status</th><th>City</th><th>Application</th><th>SBU</th><th>Expected (SAR)</th><th>PO?</th><th>Invoiced</th><th>Inv. value</th><th>Sales</th><th>Project Year</th><th></th></tr></thead>
+    <thead><tr><th title="Show in meeting slides">Slide</th><th>#</th><th>Project</th><th style="width:150px">Project type</th><th>Consultant / Client</th><th>Contractor</th><th>Status</th><th>City</th><th>Application</th><th>SBU</th><th>Expected (SAR)</th><th>PO?</th><th>Invoiced</th><th>Inv. value</th><th>Sales</th><th>Project Year</th><th></th></tr></thead>
     <tbody>${rows.map(p=>`
       <tr class="${p[PF.STATUS]==='Canceled'?'row-cancel':''}">
         <td style="text-align:center"><input type="checkbox" class="inline-flag" ${p[PF.FLAG]?'checked':''} ${pLocked()?'disabled title="Unlock with ✏ Edit cells to change"':'title="Include in Leads slides"'} onchange="toggleFlag(${p[PF.SL]})"></td>
         <td class="num">${p[PF.SL]}${p[PF.TYPE]==='Sales Lead'?'<div><span class="tag-lead">LEAD</span></div>':''}</td>
         ${edCell(p[PF.SL],PF.PROJ,p[PF.PROJ],'font-weight:700;min-width:150px')}
-        ${edCell(p[PF.SL],PF.CONS,p[PF.CONS],'min-width:110px')}
+        ${selCell(p[PF.SL],PF.TYPE,p[PF.TYPE],['','Sales Lead','Specifications converted'])}
+        ${consCell(p)}
         ${edCell(p[PF.SL],PF.CONTR,p[PF.CONTR],'min-width:90px')}
         ${selCell(p[PF.SL],PF.STATUS,p[PF.STATUS],O.projStatus)}
         ${selCell(p[PF.SL],PF.CITY,p[PF.CITY],O.cities)}
@@ -2346,6 +2350,46 @@ function renderProjects(){
         </td>
       </tr>`).join('') || '<tr><td colspan="16"><div class="empty">No projects match.</div></td></tr>'}
     </tbody></table></div>`;
+}
+/* every consultant or client on a project should exist in your contacts or Team
+   Tracking, so the cell is a list rather than free text, with a red mark when the
+   name is not linked to anything yet */
+function knownCompanies(){
+  const set=new Map();
+  S.tracking.forEach(k=>{ const n=String(k[KF.CONS]||'').trim(); if(n) set.set(n.toLowerCase(), n); });
+  S.contacts.forEach(c=>{ const n=String(c[CF.COMPANY]||'').trim(); if(n && !set.has(n.toLowerCase())) set.set(n.toLowerCase(), n); });
+  S.vendors.forEach(v=>{ const n=String(v[VF.COMPANY]||'').trim(); if(n && !set.has(n.toLowerCase())) set.set(n.toLowerCase(), n); });
+  return [...set.values()].sort((a,b)=>a.localeCompare(b));
+}
+function companyIsKnown(name){
+  const n=String(name||'').trim();
+  if(!n || n==='-') return true;
+  return S.tracking.some(k=>namesLikelySame(n, k[KF.CONS]))
+      || S.contacts.some(c=>namesLikelySame(n, c[CF.COMPANY]))
+      || S.vendors.some(v=>namesLikelySame(n, v[VF.COMPANY]));
+}
+function consCell(p){
+  const v=String(p[PF.CONS]||'');
+  const known=companyIsKnown(v);
+  if(pLocked()) return `<td class="locked" style="min-width:130px">${esc(v)}${known?'':'<div><span class="pill p-red" style="font-size:9px">not linked</span></div>'}</td>`;
+  return `<td style="min-width:150px">
+    <input list="cons-list" class="cell-inp" value="${esc(v)}" style="width:100%;font-size:12px;${known?'':'border-color:var(--red)'}"
+      onchange="setProjConsultant(${p[PF.SL]}, this.value)" placeholder="pick or type…">
+    ${known?'':'<div><span class="pill p-red" style="font-size:9px">not in your lists</span></div>'}</td>`;
+}
+function consDatalist(){
+  return `<datalist id="cons-list">${knownCompanies().map(n=>`<option value="${esc(n)}">`).join('')}</datalist>`;
+}
+async function setProjConsultant(sl, val){
+  const p=S.projects.find(x=>x[PF.SL]===sl);
+  if(!p) return;
+  const name=String(val||'').trim();
+  setProjField(sl, PF.CONS, name);
+  if(name && name!=='-' && !companyIsKnown(name)){
+    if(await appConfirm('“'+name+'” is not in your contacts or Team Tracking.\n\nAdd it to Team Tracking now?','Add it')){
+      openTrackForm(null, name);
+    }
+  }
 }
 function salesCell(p){
   if(pLocked()){
@@ -2436,13 +2480,77 @@ function buildMailto(to,subject,body){
   let b=body; if(b.length>1600) b=b.slice(0,1550)+'\n...';
   return 'mailto:'+encodeURIComponent(to)+'?subject='+encodeURIComponent(subject)+'&body='+encodeURIComponent(b);
 }
+/* ---- the house email format, copied from your own Outlook signature ---- */
+const SIG = {
+  name:'Mohamed Bakr',
+  role1:'Sr. ', role2:'Specification ', role3:'Engineer - Saudi Arabia',
+  mobile:'+966 59 636 4561',
+  tel:'+966 11 419 0966 Ex. (340)',
+  email:'Mohamed.bakr@fischer.ae',
+  addr1:'Office No. 436. Al Akaria 2. Olaya Street',
+  addr2:'Al Olaya, Riyadh 1244. Saudi Arabia',
+  site:'www.fischer.ae'
+};
+const SIG_RED='rgb(255, 0, 0)', SIG_BLUE='rgb(46, 116, 181)', SIG_DARK='rgb(36, 36, 36)';
+function sigHtml(logoSrc){
+  const A='font-family: Arial, Helvetica, sans-serif; font-size: 10pt;';
+  const p=(inner,mt)=>`<p style="text-align:left;margin:${mt||'0px'};">${inner}</p>`;
+  return `
+  <div style="text-align:left;background-color:#fff;margin:0 0 14px;font-family:Calibri,Arial,sans-serif;font-size:15px;color:rgb(31,73,125);">__________________________________________</div>
+  <table cellspacing="0" cellpadding="0" border="0" style="text-align:left;background-color:#fff;width:360px;color:${SIG_DARK};">
+    <tbody><tr>
+      <td style="text-align:left;border-right:1px solid #000;padding-right:8px;vertical-align:top;width:105px;">
+        <a href="http://www.fischer.ae/"><img alt="fischer" width="111" height="17" style="width:111px;height:17px" src="${logoSrc}"></a>
+      </td>
+      <td style="text-align:left;padding-left:8px;vertical-align:top;width:245px;">
+        ${p(`<span style="${A}color:${SIG_RED}"><b>${SIG.name}</b></span>`)}
+        ${p(`<span style="${A}color:#000"><b>${SIG.role1}</b></span><span style="${A}color:${SIG_RED}"><b>${SIG.role2}</b></span><span style="${A}color:#000"><b>${SIG.role3}</b></span>`)}
+        ${p(`<span style="${A}color:rgb(47,84,150)"><b>M:</b></span><span style="${A}color:${SIG_DARK}">&nbsp;${SIG.mobile}</span>`,'6px 0 0')}
+        ${p(`<span style="${A}color:${SIG_BLUE}"><b>T:</b></span><span style="${A}color:${SIG_DARK}">&nbsp;${SIG.tel}</span>`)}
+        ${p(`<span style="${A}color:${SIG_BLUE}"><b>E:</b></span><span style="${A}color:${SIG_DARK}">&nbsp;</span><a href="mailto:${SIG.email}" style="${A}color:rgb(5,99,193)">${SIG.email}</a>`)}
+        ${p(`<span style="${A}color:${SIG_DARK}">${SIG.addr1}</span>`,'6px 0 0')}
+        ${p(`<span style="${A}color:${SIG_DARK}">${SIG.addr2}</span>`)}
+        ${p(`<a href="http://www.fischer.ae/" style="${A}color:rgb(5,99,193)">${SIG.site}</a>`,'6px 0 0')}
+      </td>
+    </tr></tbody>
+  </table>`;
+}
+/* plain text the way you type it becomes the same layout you send from Outlook */
+function bodyHtml(text){
+  const A='font-family: Arial, Helvetica, sans-serif; font-size: 15px; color: rgb(36, 36, 36);';
+  const linkify = s => esc(s)
+    .replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" style="color:rgb(5,99,193)">$1</a>')
+    .replace(/([\w.\-]+@[\w.\-]+\.\w+)/g, '<a href="mailto:$1" style="color:rgb(5,99,193)">$1</a>');
+  const out=[];
+  let bullets=[];
+  const flush=()=>{ if(bullets.length){ out.push('<ul style="margin:0 0 16px;padding-left:22px">'+bullets.map(b=>`<li style="${A}margin-bottom:6px">${linkify(b)}</li>`).join('')+'</ul>'); bullets=[]; } };
+  String(text||'').split(/\n/).forEach(raw=>{
+    const line=raw.replace(/\s+$/,'');
+    if(/^\s*[•\-\*]\s+/.test(line)){ bullets.push(line.replace(/^\s*[•\-\*]\s+/,'')); return; }
+    flush();
+    if(!line.trim()){ return; }
+    const bold=/^(Dear |Thank you|Best regards|Kind regards)/i.test(line.trim());
+    out.push(`<p style="${A}text-align:left;margin:0 0 16px;">${bold?'<b>'+linkify(line)+'</b>':linkify(line)}</p>`);
+  });
+  flush();
+  return out.join('\n');
+}
+function emailHtml(text, logoSrc){
+  return `<html><body style="background-color:#fff;">
+<div style="font-family: Arial, Helvetica, sans-serif; font-size: 15px; color: rgb(36,36,36);">
+${bodyHtml(text)}
+${sigHtml(logoSrc)}
+</div></body></html>`;
+}
 function openEmailDraft(to, subject, body, title){
   document.getElementById('m-title').textContent = title || 'Email draft';
   document.getElementById('m-body').innerHTML=`
     <div class="f-grid">
       <div class="f-field full"><label>To</label><input id="em-to" value="${esc(to)}"></div>
       <div class="f-field full"><label>Subject</label><input id="em-sub" value="${esc(subject)}"></div>
-      <div class="f-field full"><label>Message</label><textarea id="em-body" style="min-height:210px;font-family:inherit">${esc(body)}</textarea></div>
+      <div class="f-field full"><label>Message</label><textarea id="em-body" style="min-height:170px;font-family:inherit" oninput="previewEmail()">${esc(body)}</textarea></div>
+      <div class="f-field full"><label>How it will look</label>
+        <div id="em-preview" style="border:1px solid var(--line);border-radius:9px;padding:12px 14px;background:#fff;max-height:230px;overflow:auto"></div></div>
     </div>
     <div class="f-field full" style="margin-top:4px"><label>Outlook Web account</label>
       <select onchange="setOwaHost(this.value)">
@@ -2450,7 +2558,7 @@ function openEmailDraft(to, subject, body, title){
       </select></div>
     <div class="mini-note" style="margin-top:8px;line-height:1.6">
       <b>Outlook Web</b> opens a new tab in your mailbox with this message already composed. If the tab is blocked, the link is copied so you can paste it.<br>
-      <b>⬇ Download draft</b> saves a small <b>.eml</b> file: double-click it and the Outlook desktop app opens the message ready to send.
+      <b>⬇ Download draft</b> saves an <b>.eml</b> file carrying the fischer signature and logo: double-click it and Outlook opens the message ready to send. <b>Copy</b> puts the same formatted version on the clipboard.
       ${IS_EMBEDDED?'<br>Direct <i>mailto</i> links are blocked in this preview window, so that button only appears when you open the hub file or your web link directly.':''}
     </div>`;
   document.getElementById('m-foot').innerHTML=`
@@ -2460,6 +2568,7 @@ function openEmailDraft(to, subject, body, title){
     <button class="btn" onclick="downloadEmlDraft()">⬇ Download draft</button>
     <button class="btn primary" onclick="openOutlookWeb()">Open in Outlook Web</button>`;
   document.getElementById('modal-back').classList.add('open');
+  setTimeout(previewEmail, 30);
 }
 function _emFields(){
   return {
@@ -2476,14 +2585,35 @@ function tryOpenMailApp(){
 }
 function downloadEmlDraft(){
   const f=_emFields();
+  const CID='fischerlogo@spechub';
+  const logoB64=String(FISCHER_LOGO_POS||'').replace(/^data:image\/\w+;base64,/,'');
+  const bnd='----=_SpecHub_'+Date.now();
+  const alt='----=_Alt_'+Date.now();
+  const html=emailHtml(f.body, 'cid:'+CID);
   const eml=[
     'To: '+f.to,
     'Subject: '+_mimeHeader(f.subject),
     'X-Unsent: 1',
     'MIME-Version: 1.0',
+    'Content-Type: multipart/related; boundary="'+bnd+'"; type="multipart/alternative"','',
+    '--'+bnd,
+    'Content-Type: multipart/alternative; boundary="'+alt+'"','',
+    '--'+alt,
     'Content-Type: text/plain; charset=utf-8',
     'Content-Transfer-Encoding: base64','',
-    _utf8b64(f.body).replace(/(.{76})/g,'$1\n')
+    _utf8b64(f.body).replace(/(.{76})/g,'$1\n'),'',
+    '--'+alt,
+    'Content-Type: text/html; charset=utf-8',
+    'Content-Transfer-Encoding: base64','',
+    _utf8b64(html).replace(/(.{76})/g,'$1\n'),'',
+    '--'+alt+'--','',
+    '--'+bnd,
+    'Content-Type: image/png',
+    'Content-Transfer-Encoding: base64',
+    'Content-ID: <'+CID+'>',
+    'Content-Disposition: inline; filename="fischer.png"','',
+    logoB64.replace(/(.{76})/g,'$1\n'),'',
+    '--'+bnd+'--',''
   ].join('\r\n');
   try{
     const blob=new Blob([eml],{type:'message/rfc822'});
@@ -2493,12 +2623,28 @@ function downloadEmlDraft(){
     a.href=url; a.download=safe+'.eml';
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(()=>URL.revokeObjectURL(url),1500);
-    toast('Draft downloaded. Double-click the .eml file and Outlook opens it ready to send.');
+    toast('Draft downloaded with the fischer signature. Double-click the .eml and Outlook opens it ready to send.');
   }catch(e){ toast('Could not build the draft file: '+e.message, true); }
 }
 async function copyEmailDraft(){
   const f=_emFields();
+  const html=emailHtml(f.body, FISCHER_LOGO_POS);
+  try{
+    if(navigator.clipboard && window.ClipboardItem){
+      await navigator.clipboard.write([new ClipboardItem({
+        'text/html': new Blob([html], {type:'text/html'}),
+        'text/plain': new Blob([f.body], {type:'text/plain'})
+      })]);
+      toast('Copied with the fischer formatting. Paste straight into Outlook.');
+      return;
+    }
+  }catch(e){}
   await copyText('To: '+f.to+'\nSubject: '+f.subject+'\n\n'+f.body, 'email draft');
+}
+function previewEmail(){
+  const f=_emFields();
+  const w=document.getElementById('em-preview');
+  if(w) w.innerHTML=emailHtml(f.body, FISCHER_LOGO_POS);
 }
 /* ---- fischer sales team directory ---- */
 function openTeamManager(){
@@ -2593,12 +2739,74 @@ function toggleFlag(sl){
   _projUndo={sl, field:PF.FLAG, prev:p[PF.FLAG], label:(p[PF.PROJ]||'row '+sl)+' · slide tick'};
   p[PF.FLAG]=p[PF.FLAG]?0:1; save('projects'); keepScroll(renderProjects);
 }
+/* every consultant or client used on a project, and whether it exists in your lists */
+function projectCompanyGaps(){
+  const seen=new Map();
+  S.projects.forEach(p=>{
+    /* only the consultant or client matters: contractors are outside the spec scope */
+    [[PF.CONS,'Consultant / Client']].forEach(([f,role])=>{
+      const n=String(p[f]||'').trim();
+      if(!n || n==='-') return;
+      if(companyIsKnown(n)) return;
+      const key=n.toLowerCase()+'|'+f;
+      if(!seen.has(key)) seen.set(key, {name:n, field:f, role, projects:[]});
+      seen.get(key).projects.push(p[PF.PROJ]||('row '+p[PF.SL]));
+    });
+  });
+  return [...seen.values()].sort((a,b)=>b.projects.length-a.projects.length);
+}
+function openProjectLinker(){
+  const gaps=projectCompanyGaps();
+  const known=knownCompanies();
+  document.getElementById('m-title').textContent='Project companies not in your lists — '+gaps.length;
+  document.getElementById('m-body').innerHTML = gaps.length===0
+    ? '<div class="empty">Every consultant and client on your projects is already in your contacts or Team Tracking. Contractors are not checked.</div>'
+    : `<div class="mini-note" style="margin-bottom:10px;line-height:1.7">For each one, either point it at a company you already have, which renames it on the projects, or add it to Team Tracking as a new consultant.</div>
+      <div style="max-height:56vh;overflow:auto">
+      ${gaps.map((g,i)=>`<div style="display:grid;grid-template-columns:1fr 210px 108px;gap:9px;align-items:center;padding:8px 0;border-bottom:1px solid #EEF1F6">
+        <div style="min-width:0">
+          <div style="font-weight:700;font-size:12.5px" dir="auto">${esc(g.name)}</div>
+          <div class="cell-sub">${g.role} · ${g.projects.length} project${g.projects.length>1?'s':''}: ${esc(g.projects.slice(0,2).join(', '))}${g.projects.length>2?'…':''}</div>
+        </div>
+        <select class="pl-map" data-i="${i}" style="font-size:11.5px">
+          <option value="">— leave as it is —</option>
+          ${known.map(n=>`<option value="${esc(n)}">${esc(n)}</option>`).join('')}
+        </select>
+        <button class="btn sm navy" onclick="addGapToTracking(${i})">+ Tracking</button>
+      </div>`).join('')}
+      </div>`;
+  document.getElementById('m-foot').innerHTML=`<button class="btn" onclick="closeModal()">Close</button>
+    ${gaps.length?`<button class="btn primary" onclick="applyProjectLinks()">Apply the links</button>`:''}`;
+  document.getElementById('modal-back').classList.add('open');
+  window._plGaps=gaps;
+}
+function addGapToTracking(i){
+  const g=(window._plGaps||[])[i];
+  if(!g) return;
+  closeModal();
+  openTrackForm(null, g.name);
+}
+function applyProjectLinks(){
+  const gaps=window._plGaps||[];
+  let n=0, notes=[];
+  [...document.querySelectorAll('.pl-map')].forEach(sel=>{
+    const target=sel.value; if(!target) return;
+    const g=gaps[+sel.dataset.i]; if(!g) return;
+    S.projects.forEach(p=>{
+      if(String(p[g.field]||'').trim().toLowerCase()===g.name.toLowerCase()){ p[g.field]=target; n++; }
+    });
+    notes.push(g.name+' → '+target);
+  });
+  if(n){ save('projects'); logChange('Project companies linked: '+notes.join(' · ').slice(0,160), 'Projects'); }
+  closeModal(); refreshTab();
+  toast(n? n+' project row(s) updated' : 'Nothing was changed');
+}
 function openProjectForm(sl){
   const p = sl ? S.projects.find(x=>x[PF.SL]===sl) : null;
   const O = SEED_DATA.options;
   openForm(p?'Edit project (all fields)':'New project / lead', [
     {k:PF.PROJ,label:'Project name',type:'text',full:1},
-    {k:PF.CONS,label:'Consultant',type:'text'},{k:PF.CONTR,label:'Main contractor',type:'text'},
+    {k:PF.CONS,label:'Consultant / Client',type:'datalist',opts:knownCompanies()},{k:PF.CONTR,label:'Main contractor',type:'text'},
     {k:PF.STATUS,label:'Project status',type:'select',opts:O.projStatus},
     {k:PF.CITY,label:'City',type:'select',opts:O.cities.concat([''])},
     {k:PF.APP,label:'Application',type:'text',full:1},
@@ -2619,6 +2827,10 @@ function openProjectForm(sl){
     else { const r=[nextId(S.projects),'Bakr, Mohamed','','','','Under Construction','','Saudi Arabia','','',0,'','','','','','',0,curYear(),'','',0];
       Object.entries(vals).forEach(([k,v])=>r[k]=(k==PF.EXP||k==PF.INVVAL||k==PF.FLAG)?+v||0:v); S.projects.push(r); }
     logChange((p?'Project updated: ':'Project added: ')+(vals[PF.PROJ]||'(no name)'), 'Projects');
+    { const nm=String(vals[PF.CONS]||'').trim();
+      if(nm && nm!=='-' && !companyIsKnown(nm)){
+        setTimeout(async ()=>{ if(await appConfirm('“'+nm+'” is not in your contacts or Team Tracking.\n\nAdd it to Team Tracking now?','Add it')) openTrackForm(null, nm); }, 260);
+      } }
     save('projects'); refreshTab(); buildNav(); toast('Project saved');
   });
 }
@@ -3271,6 +3483,111 @@ function parseDocName(name){
   else if(/jadeer|jadir|جدير|منشآت|munshaat/.test(low)) guess='Jadeer Certificate (جدير / منشآت)';
   return {file:name, date, nums, guess};
 }
+/* ---- read the text inside a PDF, without any external library ----
+   PDF text sits in streams that are usually Flate compressed. Modern browsers can
+   inflate that natively, so the expiry can be found even when the file name has none. */
+async function inflateBytes(bytes){
+  for(const fmt of ['deflate','deflate-raw']){
+    try{
+      const ds=new DecompressionStream(fmt);
+      const buf=await new Response(new Blob([bytes]).stream().pipeThrough(ds)).arrayBuffer();
+      return new Uint8Array(buf);
+    }catch(e){}
+  }
+  return null;
+}
+function bytesToLatin(u8){
+  let s='';
+  for(let i=0;i<u8.length;i+=8192) s+=String.fromCharCode.apply(null, u8.subarray(i,i+8192));
+  return s;
+}
+function textFromPdfOps(s){
+  let out='';
+  /* (literal) Tj   and   [(a)-2(b)] TJ */
+  s.replace(/\((?:\\.|[^\\()])*\)/g, m=>{
+    out += m.slice(1,-1).replace(/\\([()\\])/g,'$1').replace(/\\[0-7]{1,3}/g,' ') + ' ';
+    return m;
+  });
+  /* <hex> Tj, common for Arabic and for subset fonts */
+  s.replace(/<([0-9A-Fa-f\s]{4,})>/g, (m,h)=>{
+    const hx=h.replace(/\s+/g,'');
+    let t='';
+    for(let i=0;i+3<hx.length;i+=4){
+      const c=parseInt(hx.substr(i,4),16);
+      if(c>=32 && c<0xFFFD) t+=String.fromCharCode(c);
+    }
+    if(t) out+=t+' ';
+    return m;
+  });
+  return out;
+}
+function looksTextual(u8){
+  const n=Math.min(u8.length, 2048);
+  let ok=0;
+  for(let i=0;i<n;i++){ const c=u8[i]; if(c===9||c===10||c===13||(c>=32&&c<127)) ok++; }
+  return n>0 && ok/n > 0.85;
+}
+async function pdfText(file){
+  try{
+    const u8=new Uint8Array(await file.arrayBuffer());
+    const raw=bytesToLatin(u8);
+    let text='';
+    let idx=0, guard=0;
+    while(guard++ < 4000){
+      const s=raw.indexOf('stream', idx);
+      if(s<0) break;
+      let a=s+6;
+      if(raw[a]==='\r') a++;
+      if(raw[a]==='\n') a++;
+      const e=raw.indexOf('endstream', a);
+      if(e<0) break;
+      const chunk=u8.subarray(a, e);
+      idx=e+9;
+      if(chunk.length<8 || chunk.length>4_000_000) continue;
+      /* only content streams: compressed ones that inflate, or plain ASCII.
+         Image and font streams are skipped, otherwise binary noise looks like text. */
+      let body=null;
+      if(chunk[0]===0x78){
+        const plain=await inflateBytes(chunk);
+        if(plain) body=bytesToLatin(plain);
+      } else if(looksTextual(chunk)) body=bytesToLatin(chunk);
+      if(!body) continue;
+      if(!/BT[\s\S]{0,4000}?\bET\b/.test(body)) continue;       /* a real text block */
+      if(!looksTextual(new Uint8Array(chunk.length>2048?2048:chunk.length))) {}
+      text += textFromPdfOps(body) + '\n';
+      if(text.length>400000) break;
+    }
+    if(!text.trim() && looksTextual(u8)) text = raw.replace(/[^\x20-\x7E\u0600-\u06FF]+/g,' ');
+    return text;
+  }catch(e){ return ''; }
+}
+/* every date in a block of text, newest last */
+function datesInText(txt){
+  const out=new Set();
+  const MO={jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12};
+  const push=(y,m,d)=>{ const v=y+'-'+String(m).padStart(2,'0')+'-'+String(d).padStart(2,'0'); if(isDateStr(v)) out.add(v); };
+  txt.replace(/(20\d{2})[.\-\/](\d{1,2})[.\-\/](\d{1,2})/g,(m,y,a,b)=>{push(y,a,b);return m;});
+  txt.replace(/(\d{1,2})[.\-\/](\d{1,2})[.\-\/](20\d{2})/g,(m,a,b,y)=>{push(y,b,a);return m;});
+  txt.replace(/(\d{1,2})\s*([A-Za-z]{3,9})\s*(20\d{2})/g,(m,d,mo,y)=>{const k=MO[mo.slice(0,3).toLowerCase()]; if(k) push(y,k,d); return m;});
+  txt.replace(/([A-Za-z]{3,9})\s*(\d{1,2}),?\s*(20\d{2})/g,(m,mo,d,y)=>{const k=MO[mo.slice(0,3).toLowerCase()]; if(k) push(y,k,d); return m;});
+  return [...out].sort();
+}
+/* the one that is actually the expiry: prefer a date sitting next to an expiry word */
+function expiryFromText(txt){
+  const KEY=/(expiry|expire[sd]?|valid\s*(un)?til|valid\s*to|end\s*date|تاريخ\s*الانتهاء|تاريخ\s*انتهاء|صالحة?\s*حتى|نهاية\s*الصلاحية|الانتهاء)/i;
+  const flat=txt.replace(/\s+/g,' ');
+  let best='';
+  let m, re=new RegExp(KEY.source,'gi');
+  while((m=re.exec(flat))!==null){
+    const near=flat.slice(m.index, m.index+120);
+    const ds=datesInText(near);
+    if(ds.length){ const pick=ds[ds.length-1]; if(!best || pick>best) best=pick; }
+  }
+  if(best) return {date:best, how:'expiry label'};
+  const all=datesInText(flat).filter(d=>d>=today());
+  if(all.length) return {date:all[all.length-1], how:'latest future date'};
+  return {date:'', how:''};
+}
 function pickDocFolder(){
   const el=document.createElement('input');
   el.type='file'; el.multiple=true;
@@ -3291,7 +3608,8 @@ function pickDocFiles(){
 let _scanned=[], _scanGroups=[];
 function scanDocFiles(files){
   if(!files || !files.length){ toast('No files selected', true); return; }
-  _scanned=files.map(f=>parseDocName(f.name)).filter(r=>r.date || r.nums.length || r.guess);
+  _scanned=files.map(f=>Object.assign(parseDocName(f.name), {_f:f}))
+                .filter(r=>r.date || r.nums.length || r.guess);
   /* several copies of the same certificate are normal: group them and pick the best */
   const byDoc={};
   _scanned.forEach((r,i)=>{
@@ -3308,6 +3626,30 @@ function scanDocFiles(files){
     return {doc:k, list, pick:list[0].i};
   }).sort((a,b)=>a.doc.localeCompare(b.doc));
   showScanGroups();
+  readMissingDates();
+}
+async function readMissingDates(){
+  const need=_scanned.filter(r=>!r.date && r._f && /\.pdf$/i.test(r._f.name));
+  if(!need.length) return;
+  const bar=document.getElementById('scan-progress');
+  let done=0;
+  for(const r of need){
+    if(bar) bar.textContent='Reading inside '+(done+1)+' of '+need.length+' PDF(s)…';
+    const txt=await pdfText(r._f);
+    if(txt){
+      const got=expiryFromText(txt);
+      if(got.date){ r.date=got.date; r.fromPdf=got.how; }
+      if(!r.nums.length){
+        const ns=(txt.match(/\b\d{9,15}\b/g)||[]).slice(0,4);
+        if(ns.length) r.nums=[...new Set(ns)];
+      }
+    }
+    done++;
+  }
+  const found=need.filter(r=>r.date).length;
+  showScanGroups();
+  if(bar) bar.textContent='';
+  toast(found? found+' expiry date(s) read from inside the PDFs' : 'No expiry date found inside those PDFs, type it in by hand', !found);
 }
 function pickScanVersion(gi, i){ _scanGroups[gi].pick=i; showScanGroups(); scanPreview(); }
 function showScanGroups(){
@@ -3332,6 +3674,7 @@ function showScanGroups(){
                 <div class="cell-sub">${r.nums.length?'number '+esc(r.nums[0]):'no number in the name'}</div>
               </div>
               <span class="pill ${!r.date?'p-grey':(expired?'p-red':'p-green')}">${r.date?(expired?'expired '+fmtDate(r.date):'valid to '+fmtDate(r.date)):'no date'}</span>
+              ${r.fromPdf?`<span class="pill p-navy" style="font-size:9px" title="Read from inside the file, not the name">from PDF</span>`:''}
             </label>`;}).join('')}
           <div style="display:grid;grid-template-columns:70px 1fr;gap:8px;align-items:center;margin-top:8px">
             <span class="cell-sub">Apply to</span>
@@ -3763,7 +4106,10 @@ function openForm(title, fields, rec, onSave, extraFoot){
   document.getElementById('m-body').innerHTML=`<div class="f-grid">${fields.map(f=>{
     const val = rec ? rec[f.k] : (f.type==='number'?0:'');
     let inp;
-    if(f.type==='comments'){
+    if(f.type==='datalist'){
+      inp=`<input data-k="${f.k}" list="form-dl-${f.k}" value="${esc(val)}" placeholder="pick from your lists or type a new one">
+        <datalist id="form-dl-${f.k}">${(f.opts||[]).map(o=>`<option value="${esc(o)}">`).join('')}</datalist>`;
+    } else if(f.type==='comments'){
       inp=`<div data-k="${f.k}" data-type="comments">
         <div class="cm-list">${noteCards(val)}</div>
         <div style="display:flex;gap:6px;margin-top:8px">
