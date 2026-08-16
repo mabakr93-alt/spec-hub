@@ -807,20 +807,24 @@ function openFixBreakdown(){
     <button class="btn primary" onclick="closeModal();go('contacts')">Open contacts</button>`;
   document.getElementById('modal-back').classList.add('open');
 }
-function flaggedLeads(yf){ return S.projects.filter(p=>p[PF.FLAG] && p[PF.STATUS]!=='Canceled' && (!yf || String(p[PF.YEAR])===yf)); }
+function flaggedLeads(yf){ return S.projects.filter(p=>p[PF.FLAG] && !projCancelled(p) && (!yf || String(p[PF.YEAR])===yf)); }
 function buApprovalCounts(yearFilter){
   const s=buCountsSplit(yearFilter), c={};
   BU_KEYS.forEach(k=>c[k]=s[k].list+s[k].draw);
   return c;
 }
+/* a project is out of the pipeline when its status is Canceled or its PO was cancelled */
+function projCancelled(p){
+  return p[PF.STATUS]==='Canceled' || String(p[PF.PO])===PO_CANCEL;
+}
 function pipelineTotals(){
-  let exp=0, inv=0;
+  let exp=0, inv=0, lost=0, lostN=0;
   const yf=arguments.length?arguments[0]:'';
   S.projects.forEach(p=>{
-    if(p[PF.STATUS]==='Canceled') return;
     if(yf && String(p[PF.YEAR])!==yf) return;
+    if(projCancelled(p)){ lost+= +p[PF.EXP]||0; lostN++; return; }
     exp+= +p[PF.EXP]||0; inv+= +p[PF.INVVAL]||0;});
-  return {exp,inv};
+  return {exp, inv, lost, lostN};
 }
 /* ================= FILTERS / SHARED ================= */
 function appConfirm(msg, yesLabel){
@@ -903,7 +907,7 @@ function poReleased(p){
 }
 function kpiActual(key, y){
   const K=mainKpi(y);
-  const live=S.projects.filter(p=>p[PF.STATUS]!=='Canceled' && String(p[PF.YEAR])===y);
+  const live=S.projects.filter(p=>!projCancelled(p) && String(p[PF.YEAR])===y);
   switch(key){
     case 'turnover': return +((kpiTargets()['turnover']||{}).val)||0;   /* country turnover, entered by you */
     case 'vlA': return K.byClass.A + K.byClass.Auth + K.byClass.Dev + onlineRegistered(y).length;
@@ -925,7 +929,7 @@ function kpiActual(key, y){
 /* the records behind each incentive figure, so a row can be opened and checked */
 function kpiEvidence(key, y){
   const K=mainKpi(y);
-  const live=S.projects.filter(p=>p[PF.STATUS]!=='Canceled' && String(p[PF.YEAR])===y);
+  const live=S.projects.filter(p=>!projCancelled(p) && String(p[PF.YEAR])===y);
   const sbuOf=cls=>sbuLines(y).filter(l=>l.cls===cls)
         .map(l=>({n:l.co+' — '+l.sbu, t:(l.vl?'vendor list '+fmtDate(l.vl):'in drawings '+fmtDate(l.dr))}));
   const portals=()=>onlineRegistered(y).map(r=>({n:r[RF.COMPANY]+' (online portal)', t:r[RF.DATE]?fmtDate(r[RF.DATE]):'no date'}));
@@ -1149,7 +1153,9 @@ function renderDash(){
     <div class="kpi" style="opacity:.85"><div class="k-label">Companies with fischer listed</div><div class="k-val">${vs.total}</div>
       <div class="k-note">secondary statistic · vendor list ${vs.list} · drawings only ${vs.draw}</div></div>
     <div class="kpi"><div class="k-label">Sales Leads</div><div class="k-val">${flaggedLeads(y).length}</div><div class="k-note">${y?y+' projects flagged for slides':'all flagged for slides'}</div></div>
-    <div class="kpi"><div class="k-label">Pipeline Expected</div><div class="k-val" style="font-size:19px;padding-top:6px">${kpiHidden()?'•••':fmtSAR(pt.exp)}</div><div class="k-note">Invoiced: ${kpiHidden()?'•••':fmtSAR(pt.inv)}</div></div>
+    <div class="kpi" title="Cancelled projects and cancelled POs are excluded"><div class="k-label">Pipeline Expected</div><div class="k-val" style="font-size:19px;padding-top:6px">${kpiHidden()?'•••':fmtSAR(pt.exp)}</div>
+      <div class="k-note">Invoiced: ${kpiHidden()?'•••':fmtSAR(pt.inv)}</div>
+      ${pt.lostN?`<div class="k-note"><span class="due-late">${pt.lostN} cancelled · ${kpiHidden()?'•••':fmtSAR(pt.lost)} excluded</span></div>`:''}</div>
 
     <div class="kpi"><div class="k-label">Open Tasks</div><div class="k-val">${openT.length}</div><div class="k-note">${overdue.length? `<span class="due-late">${overdue.length} overdue</span>`:'none overdue'}</div></div>
   </div>
@@ -2298,14 +2304,16 @@ function renderProjects(){
     else if(f.year==='prev') rows=rows.filter(p=>p[PF.YEAR] && String(p[PF.YEAR])!==curYear());
   }
   if(searching){const q=f.q.toLowerCase(); rows=rows.filter(p=>[p[PF.CONS],p[PF.PROJ],p[PF.CONTR],p[PF.APP],p[PF.CITY]].join(' ').toLowerCase().includes(q));}
-  const live=rows.filter(p=>p[PF.STATUS]!=='Canceled');
+  const live=rows.filter(p=>!projCancelled(p));
+  const dead=rows.filter(projCancelled);
   const exp=live.reduce((s,p)=>s+(+p[PF.EXP]||0),0), inv=live.reduce((s,p)=>s+(+p[PF.INVVAL]||0),0);
+  const lost=dead.reduce((s,p)=>s+(+p[PF.EXP]||0),0);
   const O=SEED_DATA.options;
 
   C.innerHTML=`
   <div class="kpi-grid" style="grid-template-columns:repeat(auto-fit,minmax(170px,1fr))">
     <div class="kpi"><div class="k-label">Projects shown</div><div class="k-val">${rows.length}</div></div>
-    <div class="kpi accent"><div class="k-label">Expected PO value</div><div class="k-val" style="font-size:20px;padding-top:5px">${fmtSAR(exp)}</div></div>
+    <div class="kpi accent" title="Cancelled projects and cancelled POs are excluded"><div class="k-label">Expected PO value</div><div class="k-val" style="font-size:20px;padding-top:5px">${fmtSAR(exp)}</div>${dead.length?`<div class="k-note"><span class="due-late">${dead.length} cancelled · ${fmtSAR(lost)} excluded</span></div>`:''}</div>
     <div class="kpi"><div class="k-label">Invoiced</div><div class="k-val" style="font-size:20px;padding-top:5px;color:var(--green)">${fmtSAR(inv)}</div></div>
     <div class="kpi"><div class="k-label">In meeting slides</div><div class="k-val">${flaggedLeads().length}</div><div class="k-note">tick Slide to include</div></div>
   </div>
