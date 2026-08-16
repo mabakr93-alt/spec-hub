@@ -2979,6 +2979,22 @@ document.addEventListener('click', e=>{
   if(p && p.style.display==='block' && !p.contains(e.target)) closePop();
 });
 
+/* a vendor entry can only exist for a company you already track */
+function vendorPickCompany(sel){
+  const o=sel.options[sel.selectedIndex];
+  if(!o || !o.value) return;
+  const t=document.getElementById('vd-t'), p=document.getElementById('vd-p');
+  if(t && o.dataset.type) t.value=o.dataset.type;
+  if(p && o.dataset.prio) p.value=o.dataset.prio;
+}
+function trackingChoices(){
+  const used=new Set(S.vendors.map(v=>_norm(v[VF.COMPANY])));
+  const map={'Consultant':'Consultant','Developers':'Developer','Developer':'Developer','Authorities':'Authorities','Contractor':'Contractor'};
+  return [...S.tracking]
+    .filter(k=>String(k[KF.CONS]||'').trim())
+    .sort((a,b)=>String(a[KF.CONS]).localeCompare(String(b[KF.CONS])))
+    .map(k=>({name:k[KF.CONS], type:map[k[KF.TYPE]]||'Consultant', prio:k[KF.PRIO]||'B', used:used.has(_norm(k[KF.CONS]))}));
+}
 function openVendorForm(id){
   const v=id?S.vendors.find(x=>x[VF.ID]===id):null;
   const empty={anchor:['Not Started','',''],hs:['Not Started','',''],firestop:['Not Started','',''],facade:['Not Started','',''],retro:['Not Started','','']};
@@ -2986,7 +3002,15 @@ function openVendorForm(id){
   document.getElementById('m-title').textContent=v?'Edit vendor entry':'New vendor entry';
   document.getElementById('m-body').innerHTML=`
     <div class="f-grid">
-      <div class="f-field full"><label>Company</label><input id="vd-c" value="${esc(d[VF.COMPANY])}"></div>
+      <div class="f-field full"><label>Company — chosen from Team Tracking</label>
+        ${v ? `<input id="vd-c" value="${esc(d[VF.COMPANY])}" readonly style="background:var(--soft)">
+               <div class="mini-note">The company cannot be changed here. Rename it in Team Tracking and it follows.</div>`
+            : `<select id="vd-c" onchange="vendorPickCompany(this)">
+                 <option value="">— pick a consultant from Team Tracking —</option>
+                 ${trackingChoices().map(o=>`<option value="${esc(o.name)}" data-type="${esc(o.type)}" data-prio="${esc(o.prio)}"${o.used?' disabled':''}>${esc(o.name)}${o.used?' · already in the vendor list':''}</option>`).join('')}
+               </select>
+               <div class="mini-note">Not there? <a href="#" onclick="event.preventDefault();closeModal();openTrackForm();">Add the consultant to Team Tracking first</a>, then come back.</div>`}
+      </div>
       <div class="f-field"><label>Type</label><select id="vd-t">${SEED_DATA.options.vendorType.map(o=>`<option ${d[VF.TYPE]===o?'selected':''}>${o}</option>`).join('')}</select></div>
       <div class="f-field"><label>Priority</label><select id="vd-p">${['A','B','C'].map(o=>`<option ${d[VF.PRIO]===o?'selected':''}>${o}</option>`).join('')}</select></div>
       <div class="f-field full"><label>Company note (not counted)</label><select id="vd-s">${SEED_DATA.options.vendorStatus.map(o=>`<option ${d[VF.STATUS]===o?'selected':''}>${o}</option>`).join('')}</select></div>
@@ -3006,7 +3030,14 @@ function openVendorForm(id){
 }
 function saveVendor(id){
   const g=i=>document.getElementById(i).value.trim();
-  if(!g('vd-c')) return toast('Company name required',true);
+  const company=g('vd-c');
+  if(!company) return toast('Pick a consultant from Team Tracking first', true);
+  if(!id){
+    if(!S.tracking.some(k=>_norm(k[KF.CONS])===_norm(company)))
+      return toast(company+' is not in Team Tracking. Add it there first.', true);
+    if(S.vendors.some(v=>_norm(v[VF.COMPANY])===_norm(company)))
+      return toast(company+' already has a vendor entry. Open that one instead.', true);
+  }
   const bus={};
   BU_KEYS.forEach(k=>{ bus[k]=[g('vb-'+k), g('vbvl-'+k), g('vbdr-'+k)]; });
   const rec=[id||nextId(S.vendors), g('vd-c'), g('vd-t'), g('vd-p'), g('vd-s'), g('vd-n'), g('vd-m'), g('vd-e'), bus];
@@ -3094,6 +3125,51 @@ function updateFollowupCount(){
 }
 
 /* ================= UPGRADE HELPER ================= */
+function repoCfg(){
+  try{ return JSON.parse(localStorage.getItem('spechub3_repo')) || {}; }catch(e){ return {}; }
+}
+function saveRepoCfg(c){ try{ localStorage.setItem('spechub3_repo', JSON.stringify(c)); }catch(e){} }
+function guessRepo(){
+  const c=repoCfg();
+  if(c.user && c.repo) return c;
+  try{
+    const m=String(location.hostname).match(/^([\w-]+)\.github\.io$/);
+    const seg=String(location.pathname).split('/').filter(Boolean)[0];
+    if(m) return {user:m[1], repo:seg||m[1]+'.github.io'};
+  }catch(e){}
+  return {};
+}
+function repoUploadUrl(){
+  const r=guessRepo();
+  return (r.user && r.repo) ? 'https://github.com/'+r.user+'/'+r.repo+'/upload/main' : '';
+}
+function setRepo(user, repo){
+  saveRepoCfg({user:String(user||'').trim(), repo:String(repo||'').trim()});
+  toast('Saved. The upload page is now one click away.');
+  openUpgradeGuide();
+}
+/* ---- tell me when a newer file is live, instead of guessing about the cache ---- */
+let _liveStamp=null;
+async function checkForUpdate(quiet){
+  if(!location.protocol.startsWith('http')){ if(!quiet) toast('Only works when the hub is opened from your web link', true); return; }
+  try{
+    const r=await fetch(location.href+'?v='+Date.now(), {method:'HEAD', cache:'no-store'});
+    const lm=r.headers.get('last-modified');
+    if(!lm) return;
+    const t=new Date(lm).getTime();
+    if(_liveStamp===null){ _liveStamp=t; if(!quiet) toast('You are on the newest version'); return; }
+    if(t>_liveStamp){
+      const bar=document.getElementById('update-bar');
+      if(bar){ bar.style.display='flex'; }
+    } else if(!quiet) toast('You are on the newest version');
+  }catch(e){ if(!quiet) toast('Could not check: '+e.message, true); }
+}
+function hardReload(){
+  try{
+    if(window.caches && caches.keys) caches.keys().then(ks=>ks.forEach(k=>caches.delete(k)));
+  }catch(e){}
+  location.replace(location.pathname+'?v='+Date.now()+location.hash);
+}
 function openUpgradeGuide(){
   const c=syncCfg();
   const synced=!!(c.token && c.gist);
@@ -3108,13 +3184,30 @@ function openUpgradeGuide(){
           <div style="font-weight:800;font-size:12.5px">Sync is not set up yet</div>
           <div class="cell-sub">Until it is, every new file starts empty and you have to restore a backup by hand. Setting it up once removes that step for good.</div>
           <div style="margin-top:7px"><button class="btn sm navy" onclick="closeModal();openSync()">Set up sync now</button></div></div>`}
-    <div class="doc-sec"><h3>Each time I send a new file</h3>
-      <div style="font-size:12.5px;line-height:1.9">
-        1 · Rename the download to <b>index.html</b><br>
-        2 · GitHub → your <b>spec-hub</b> repo → <b>Add file → Upload files</b> → drop it in → <b>Commit changes</b><br>
-        3 · Wait a minute, open your page, hard refresh with <b>Ctrl+Shift+R</b><br>
-        4 · Check the build date under your name in the sidebar${synced?'':'<br>5 · Restore your backup file, since sync is off'}
-      </div></div>
+    ${(()=>{const u=repoUploadUrl(); const r=guessRepo();
+      return u ? `<div class="doc-sec"><h3>Fastest route — three clicks</h3>
+        <div style="font-size:12.5px;line-height:1.9">
+          1 · <a href="${u}" target="_blank" rel="noopener" style="font-weight:800">Open the upload page for ${esc(r.user)}/${esc(r.repo)}</a><br>
+          2 · Drag the downloaded <b>index.html</b> onto it, then press <b>Commit changes</b><br>
+          3 · Come back here and press <b>⟳ Reload now</b> below
+        </div>
+        <div style="margin-top:8px;display:flex;gap:7px;flex-wrap:wrap">
+          <a class="btn sm primary" style="text-decoration:none" href="${u}" target="_blank" rel="noopener">⬆ Open upload page</a>
+          <button class="btn sm navy" onclick="hardReload()">⟳ Reload now</button>
+          <button class="btn sm" onclick="checkForUpdate(false)">Check for a newer file</button>
+        </div>
+        <div class="mini-note" style="margin-top:6px">The file I send is already named <b>index.html</b>, so there is nothing to rename.</div>
+      </div>`
+      : `<div class="doc-sec"><h3>Tell me your repository once</h3>
+        <div class="mini-note" style="margin-bottom:7px">Then the upload page becomes a single click from here.</div>
+        <div style="display:flex;gap:7px;flex-wrap:wrap;align-items:center">
+          <input id="rp-user" placeholder="GitHub username" style="width:180px">
+          <input id="rp-repo" placeholder="repository, e.g. spec-hub" style="width:190px">
+          <button class="btn sm primary" onclick="setRepo(document.getElementById('rp-user').value, document.getElementById('rp-repo').value)">Save</button>
+        </div></div>`;})()}
+    <div class="doc-sec"><h3>Even faster, if you can install it</h3>
+      <div style="font-size:12.5px;line-height:1.8">Install <b>GitHub Desktop</b> and clone the repository once. After that: drop the new file into the folder, replacing the old one, then press <b>Commit</b> and <b>Push</b>. Two clicks, no browser, no upload page.</div>
+    </div>
     <div class="doc-sec"><h3>Before you upgrade</h3>
       <div style="font-size:12.5px;line-height:1.9">Press <b>💾 Save</b>, then ${synced?'<b>⟳ Sync</b> so the Gist holds your latest work':'<b>⬇ Backup</b> and keep the file'}.</div></div>`;
   document.getElementById('m-foot').innerHTML=`
@@ -5610,6 +5703,8 @@ function ensureTaskOrders(){
   startAlarms();
   /* if sync is set up, pull whatever the other device pushed, so the phone is never stale */
   try{ if(navigator.storage && navigator.storage.persist) navigator.storage.persist(); }catch(e){}
+  setTimeout(()=>checkForUpdate(true), 2500);
+  setInterval(()=>checkForUpdate(true), 600000);
   (async ()=>{
     const fromUrl=readSetupFromUrl();
     if(fromUrl && !syncCfg().token){
