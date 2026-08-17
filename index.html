@@ -1750,41 +1750,55 @@ function colName(i){ let s=''; i++; while(i>0){ const m=(i-1)%26; s=String.fromC
    6 developer · 7 authority · 8 consultant band · 9 prio A · 10 prio B · 11 prio C
    13 developer banner · 14 authority banner · 15 consulting banner */
 function xlsxStyles(){
-  const font=(sz,b,color,name)=>`<font><sz val="${sz}"/>${b?'<b/>':''}<color rgb="FF${color}"/><name val="${name||'Calibri'}"/></font>`;
-  const fill=c=>c?`<fill><patternFill patternType="solid"><fgColor rgb="FF${c}"/><bgColor indexed="64"/></patternFill></fill>`:'<fill><patternFill patternType="none"/></fill>';
+  const FONTS=[
+    {sz:11,c:'242424'}, {sz:18,b:1,c:'E2001A'}, {sz:10,c:'6B7280'}, {sz:11,b:1,c:'FFFFFF'},
+    {sz:11,b:1,c:'1F3864'}, {sz:11,b:1,c:'E2001A'}, {sz:11,b:1,c:'0B5394'}, {sz:11,c:'242424'},
+    {sz:10,b:1,c:'FFFFFF'}, {sz:10,c:'C00000'}, {sz:10,b:1,c:'1F3864'}, {sz:10,c:'242424'}
+  ];
+  const FILLS=['','gray125','E2001A','FFFFFF','F7F9FC','FFF3D6','E3F0FB','FDECEE','EFF9F2','1F3864','E9EDF3','D9E2F3','E2EFDA'];
   const thin='<left style="thin"><color rgb="FFD6DCE4"/></left><right style="thin"><color rgb="FFD6DCE4"/></right><top style="thin"><color rgb="FFD6DCE4"/></top><bottom style="thin"><color rgb="FFD6DCE4"/></bottom>';
-  /* Excel is strict: fill 0 must be none and fill 1 must be gray125, and the
-     cellStyles, dxfs and tableStyles blocks must exist or it offers to repair. */
+  /* id: [font, fill, border, halign, valign, wrap] */
+  const XF=[
+    [0,0,0], [1,0,0,'','center'], [2,0,0],
+    [3,2,1,'center','center',1],
+    [0,3,1,'','top',1], [0,4,1,'','top',1], [0,5,1,'','top',1], [0,6,1,'','top',1], [0,3,1,'','top',1],
+    [5,7,1,'center','center'], [4,5,1,'center','center'], [11,3,1,'center','center'], [6,6,1,'','center'],
+    [4,5,1,'','center'], [6,6,1,'','center'], [4,4,1,'','center'],
+    [10,11,1,'center','center'],                 /* 16 legend */
+    [8,9,1,'center','center',1],                 /* 17 tracking header */
+    [10,10,1,'center','center',1],               /* 18 tracking sub-header */
+    [11,3,1,'','center',1],                      /* 19 body left */
+    [11,3,1,'center','center'],                  /* 20 body centre */
+    [11,10,1,'center','center'],                 /* 21 status 0 */
+    [11,5,1,'center','center'],                  /* 22 status 1 */
+    [11,6,1,'center','center'],                  /* 23 status 2 */
+    [11,8,1,'center','center'],                  /* 24 status 3 */
+    [10,12,1,'center','center'],                 /* 25 status 4 */
+    [9,3,1,'','center',1],                       /* 26 note in red */
+    [10,4,1,'','center',1]                       /* 27 group cell */
+  ];
+  const fontXml=FONTS.map(f=>`<font><sz val="${f.sz}"/>${f.b?'<b/>':''}<color rgb="FF${f.c}"/><name val="Calibri"/></font>`).join('');
+  const fillXml=FILLS.map(c=>!c?'<fill><patternFill patternType="none"/></fill>'
+    : c==='gray125'?'<fill><patternFill patternType="gray125"/></fill>'
+    : `<fill><patternFill patternType="solid"><fgColor rgb="FF${c}"/><bgColor indexed="64"/></patternFill></fill>`).join('');
+  const xfXml=XF.map(x=>{
+    const [f,fl,bd,ha,va,wrap]=x;
+    const al=(ha||va||wrap)?`<alignment${ha?` horizontal="${ha}"`:''}${va?` vertical="${va}"`:''}${wrap?' wrapText="1"':''}/>`:'';
+    return `<xf numFmtId="0" fontId="${f}" fillId="${fl}" borderId="${bd}" xfId="0" applyFont="1" applyFill="1" applyBorder="1"${al?' applyAlignment="1"':''}>${al}</xf>`;
+  }).join('');
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
-<fonts count="8">${font(11,0,'242424')}${font(18,1,'E2001A')}${font(10,0,'6B7280')}${font(11,1,'FFFFFF')}${font(11,1,'1F3864')}${font(11,1,'E2001A')}${font(11,1,'0B5394')}${font(11,0,'242424')}</fonts>
-<fills count="9"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill>${fill('E2001A')}${fill('FFFFFF')}${fill('F7F9FC')}${fill('FFF3D6')}${fill('E3F0FB')}${fill('FDECEE')}${fill('EFF9F2')}</fills>
+<fonts count="${FONTS.length}">${fontXml}</fonts>
+<fills count="${FILLS.length}">${fillXml}</fills>
 <borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border><border>${thin}<diagonal/></border></borders>
 <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
-<cellXfs count="16">
-<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
-<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1"><alignment vertical="center"/></xf>
-<xf numFmtId="0" fontId="2" fillId="0" borderId="0" xfId="0" applyFont="1"/>
-<xf numFmtId="0" fontId="3" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>
-<xf numFmtId="0" fontId="0" fillId="3" borderId="1" xfId="0" applyFill="1" applyBorder="1" applyAlignment="1"><alignment vertical="top" wrapText="1"/></xf>
-<xf numFmtId="0" fontId="0" fillId="4" borderId="1" xfId="0" applyFill="1" applyBorder="1" applyAlignment="1"><alignment vertical="top" wrapText="1"/></xf>
-<xf numFmtId="0" fontId="0" fillId="5" borderId="1" xfId="0" applyFill="1" applyBorder="1" applyAlignment="1"><alignment vertical="top" wrapText="1"/></xf>
-<xf numFmtId="0" fontId="0" fillId="6" borderId="1" xfId="0" applyFill="1" applyBorder="1" applyAlignment="1"><alignment vertical="top" wrapText="1"/></xf>
-<xf numFmtId="0" fontId="0" fillId="3" borderId="1" xfId="0" applyFill="1" applyBorder="1" applyAlignment="1"><alignment vertical="top" wrapText="1"/></xf>
-<xf numFmtId="0" fontId="5" fillId="7" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
-<xf numFmtId="0" fontId="4" fillId="5" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
-<xf numFmtId="0" fontId="7" fillId="3" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
-<xf numFmtId="0" fontId="6" fillId="6" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment vertical="center"/></xf>
-<xf numFmtId="0" fontId="4" fillId="5" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment vertical="center"/></xf>
-<xf numFmtId="0" fontId="6" fillId="6" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment vertical="center"/></xf>
-<xf numFmtId="0" fontId="4" fillId="4" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment vertical="center"/></xf>
-</cellXfs>
+<cellXfs count="${XF.length}">${xfXml}</cellXfs>
 <cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
 <dxfs count="0"/>
 <tableStyles count="0" defaultTableStyle="TableStyleMedium2" defaultPivotStyle="PivotStyleLight16"/>
 </styleSheet>`;
 }
-function xlsxSheet(rows, cols, freezeRow, autofilterRef){
+function xlsxSheet(rows, cols, freezeRow, autofilterRef, extraMerges){
   const body=rows.map((r,ri)=>{
     const cells=r.cells.map((c,ci)=>{
       const ref=colName(ci)+(ri+1);
@@ -1796,6 +1810,7 @@ function xlsxSheet(rows, cols, freezeRow, autofilterRef){
   }).join('');
   const merges=[];
   rows.forEach((r,ri)=>{ if(r.merge) merges.push(`<mergeCell ref="A${ri+1}:${colName(cols.length-1)}${ri+1}"/>`); });
+  (extraMerges||[]).forEach(ref=>merges.push(`<mergeCell ref="${ref}"/>`));
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
 <sheetViews><sheetView showGridLines="0" tabSelected="1" workbookViewId="0">
@@ -1807,7 +1822,7 @@ ${autofilterRef?`<autoFilter ref="${autofilterRef}"/>`:''}
 ${merges.length?`<mergeCells count="${merges.length}">${merges.join('')}</mergeCells>`:''}
 </worksheet>`;
 }
-function writeXlsx(filename, rows, cols, freezeRow, autofilterRef, sheetName){
+function writeXlsx(filename, rows, cols, freezeRow, autofilterRef, sheetName, extraMerges){
   const files=[
     {name:'[Content_Types].xml', data:`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
@@ -1829,13 +1844,92 @@ function writeXlsx(filename, rows, cols, freezeRow, autofilterRef, sheetName){
 <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
 <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`},
     {name:'xl/styles.xml', data:xlsxStyles()},
-    {name:'xl/worksheets/sheet1.xml', data:xlsxSheet(rows, cols, freezeRow, autofilterRef)}
+    {name:'xl/worksheets/sheet1.xml', data:xlsxSheet(rows, cols, freezeRow, autofilterRef, extraMerges)}
   ];
   const blob=new Blob([zipStore(files)], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
   const url=URL.createObjectURL(blob);
   const a=document.createElement('a'); a.href=url; a.download=filename;
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(()=>URL.revokeObjectURL(url), 1500);
+}
+/* ---- Team Tracking in the exact shape of the shared team file ---- */
+function exportTrackingPro(mineOnly){
+  try{
+    const COLS=[6.5,26,8.3,16,18,15,9.5,11,17,12, 23.3,18.6,32.8,23.3,18.6,32.8, 29,20.3,20.3, 33.5];
+    const rows=[], merges=[];
+    const pad=n=>Array(n).fill({v:'',s:0});
+    /* row 1 — the status legend, exactly as in the team file */
+    rows.push({cells:[
+      {v:'0',s:16},{v:'New',s:16},{v:'1',s:16},{v:'Contact generated',s:16},
+      {v:'2',s:16},{v:'First Meeting Done',s:16},{v:'3',s:16},{v:'In the Vendor list',s:16},
+      {v:'4',s:16},{v:'Specific/Master Specification',s:16}, ...pad(10)], h:20});
+    /* rows 2 and 3 — grouped headers */
+    const H=['S.No','Consultant','Priority','Type of Specifier','Handled By','BU','Status','Seminar','Documentation submission','Fixperience'];
+    rows.push({cells:[...H.map(h=>({v:h,s:17})),
+      {v:'Contact',s:17},{v:'',s:17},{v:'',s:17},{v:'',s:17},{v:'',s:17},{v:'',s:17},
+      {v:'Portal Details',s:17},{v:'',s:17},{v:'',s:17},
+      {v:'Notes',s:17}], h:30});
+    rows.push({cells:[...H.map(()=>({v:'',s:18})),
+      {v:'Name-1',s:18},{v:'Mobile',s:18},{v:'Email',s:18},
+      {v:'Name-2',s:18},{v:'Mobile',s:18},{v:'Email',s:18},
+      {v:'Website',s:18},{v:'User Name',s:18},{v:'Password',s:18},
+      {v:'',s:18}], h:20});
+    for(let c=0;c<10;c++) merges.push(colName(c)+'2:'+colName(c)+'3');
+    merges.push('K2:P2','Q2:S2','T2:T3');
+    /* data: one block per consultant, the four main BUs always present */
+    const list=S.tracking.filter(k=>String(k[KF.CONS]||'').trim() && (!mineOnly || isMyTracking(k)));
+    const stStyle=v=>({'0':21,'1':22,'2':23,'3':24,'4':25}[String(v||'0')]||21);
+    let n=0;
+    list.forEach(k=>{
+      const bus=[...(k[KF.BUS]||[])];
+      TRACK_MAIN_BUS.forEach(b=>{ if(!bus.some(x=>String(x[0]).trim().toLowerCase()===b.toLowerCase())) bus.push([b,'0','No','No','No']); });
+      bus.sort((a,b)=>{
+        const ia=TRACK_MAIN_BUS.findIndex(x=>x.toLowerCase()===String(a[0]).toLowerCase());
+        const ib=TRACK_MAIN_BUS.findIndex(x=>x.toLowerCase()===String(b[0]).toLowerCase());
+        return (ia<0?9:ia)-(ib<0?9:ib);
+      });
+      const cons=k[KF.CONTACTS]||[];
+      const c1=cons[0]||['','','',''], c2=cons[1]||['','','',''];
+      const extra=cons.slice(2);
+      const nRows=Math.max(bus.length, 1+extra.length, 1);
+      const first=rows.length+1;
+      n++;
+      for(let i=0;i<nRows;i++){
+        const b=bus[i]||['','','','',''];
+        const e=i>0?(extra[i-1]||['','','','']):null;
+        rows.push({cells:[
+          {v:i===0?n:'', s:20},
+          {v:i===0?k[KF.CONS]:'', s:19},
+          {v:i===0?(k[KF.PRIO]||''):'', s:20},
+          {v:i===0?(k[KF.TYPE]||''):'', s:19},
+          {v:i===0?(k[KF.HANDLER]||''):'', s:19},
+          {v:b[0]||'', s:19},
+          {v:b[0]?String(b[1]||'0'):'', s:b[0]?stStyle(b[1]):20},
+          {v:b[0]?(b[2]||'No'):'', s:20},
+          {v:b[0]?(b[3]||'No'):'', s:20},
+          {v:b[0]?(b[4]||'No'):'', s:20},
+          {v:i===0?(c1[0]||''):'', s:19},
+          {v:i===0?(c1[1]||''):'', s:19},
+          {v:i===0?(c1[2]||''):'', s:19},
+          {v:i===0?(c2[0]||''):(e?e[0]:''), s:19},
+          {v:i===0?(c2[1]||''):(e?e[1]:''), s:19},
+          {v:i===0?(c2[2]||''):(e?e[2]:''), s:19},
+          {v:i===0?(k[KF.PORTAL][0]||''):'', s:19},
+          {v:i===0?(k[KF.PORTAL][1]||''):'', s:19},
+          {v:i===0?(k[KF.PORTAL][2]||''):'', s:19},
+          {v:i===0?(k[KF.NOTES]||''):'', s:k[KF.NOTES]?26:19}
+        ]});
+      }
+      if(nRows>1){
+        const last=first+nRows-1;
+        ['A','B','C','D','E','K','L','M','Q','R','S','T'].forEach(col=>merges.push(col+first+':'+col+last));
+      }
+    });
+    writeXlsx('fischer_Team_Tracking_'+(mineOnly?'MohamedBakr_':'')+stampNow()+'.xlsx',
+      rows, COLS, 3, '', 'Tracking', merges);
+    logChange('Team Tracking exported in the team format ('+list.length+' consultants)', 'Tracking');
+    toast(list.length+' consultants exported in the shared team layout');
+  }catch(e){ toast('Export failed: '+e.message, true); }
 }
 function exportDirectory(){
   try{
@@ -2450,7 +2544,8 @@ function renderTracking(){
     <span class="count-note">${rows.length} consultants${S.tracking.filter(x=>x[KF.NEW]).length?` · <span class="due-late">${S.tracking.filter(x=>x[KF.NEW]).length} new from contacts, in red until you press ✓</span>`:''}</span>
     ${(()=>{const g=trackingContactGaps().length; return g?`<button class="btn sm" style="border-color:var(--red);color:var(--red)" onclick="openTrackingGaps()" title="People with no card in Contacts${(FLT.gaps.mine!==false)?' (your consultants only)':''}">⚠ Not in Contacts: ${g}</button>`:'';})()}
     <button class="btn sm navy" onclick="openDirectory()" title="One list of every office and developer with the responsible engineer">📇 Directory report</button>
-    <button class="btn sm" onclick="exportSheet('tracking')">Export sheet</button>
+    <button class="btn sm" onclick="exportTrackingPro(true)" title="The shared team layout, your consultants only">⬇ Excel (team format)</button>
+    <button class="btn sm" onclick="exportTrackingPro(false)" title="The shared team layout, whole team">⬇ Excel (all)</button>
     <button class="btn primary sm" onclick="openTrackForm()">+ Add consultant</button>
   </div>
   <div class="legend" style="margin-bottom:11px">Status — click any chip to advance:
