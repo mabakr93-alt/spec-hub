@@ -1548,7 +1548,7 @@ function syncContactToTracking(c){
   const company=String(c[CF.COMPANY]||'').trim();
   if(!company) return null;
   const person=String(c[CF.NAME]||'').trim();
-  const row=[person, String(c[CF.MOBILE]||'').trim(), String(c[CF.EMAIL]||'').trim()];
+  const row=[person, String(c[CF.MOBILE]||'').trim(), String(c[CF.EMAIL]||'').trim(), String(c[CF.DESIG]||'').trim()];
   let k=S.tracking.find(t=>namesLikelySame(company, t[KF.CONS]));
   let mode;
   if(k){
@@ -1556,6 +1556,10 @@ function syncContactToTracking(c){
       (row[2] && String(x[2]).toLowerCase()===row[2].toLowerCase()) ||
       (row[0] && _norm(x[0])===_norm(row[0])));
     if(!dup && (row[0]||row[2])) k[KF.CONTACTS].push(row);
+    else if(dup && row[3]){
+      const hit=k[KF.CONTACTS].find(x=>(row[2]&&String(x[2]).toLowerCase()===row[2].toLowerCase())||(row[0]&&_norm(x[0])===_norm(row[0])));
+      if(hit && !hit[3]) hit[3]=row[3];
+    }
     mode = dup ? 'existing' : 'added';
   } else {
     k=[0, company, 'B', 'Consultant', 'Bakr Mohamed', [], (row[0]||row[2])?[row]:[], ['','',''], '', ''];
@@ -1593,7 +1597,7 @@ function directoryRows(opt){
       if(!nm && !em) return;
       const key=(em||nm).toLowerCase();
       if(seen.has(key)) return; seen.add(key);
-      people.push({name:nm, role:'', mobile:mo, email:em, src:'tracking'});
+      people.push({name:nm, role:String(p[3]||''), mobile:mo, email:em, src:'tracking'});
     });
     S.contacts.forEach(c=>{
       if(!namesLikelySame(co, c[CF.COMPANY])) return;
@@ -1949,7 +1953,7 @@ function applyTrackingGaps(){
   let n=0;
   pick.forEach(i=>{
     const g=gaps[i]; if(!g) return;
-    const r=[nextId(S.contacts), g.company, '', g.p[0]||'', g.p[1]||'', g.p[2]||'', '', '', 0, 0, '', '', curYear(), '', ''];
+    const r=[nextId(S.contacts), g.company, g.p[3]||'', g.p[0]||'', g.p[1]||'', g.p[2]||'', '', '', 0, 0, '', '', curYear(), '', '', ''];
     S.contacts.push(r); n++;
   });
   if(n){ save('contacts'); logChange(n+' contact card(s) rebuilt from Team Tracking', 'Contacts'); }
@@ -1970,7 +1974,7 @@ function syncTrackingContactsToContacts(k){
     const nm=String(p[0]||'').trim(), em=String(p[2]||'').trim();
     if(!nm && !em) return;
     if(contactExistsFor(k[KF.CONS], p)) return;
-    S.contacts.push([nextId(S.contacts), k[KF.CONS], '', nm, String(p[1]||'').trim(), em, '', '', 0, 0, '', '', curYear(), '', '']);
+    S.contacts.push([nextId(S.contacts), k[KF.CONS], String(p[3]||'').trim(), nm, String(p[1]||'').trim(), em, '', '', 0, 0, '', '', curYear(), '', '', '']);
     names.push(nm||em); n++;
   });
   if(n){
@@ -2502,12 +2506,22 @@ function trackBURowHTML(b){
     <button type="button" class="icon-btn" onclick="this.parentElement.remove()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>`;
 }
 function trackConRowHTML(c){
-  return `<div style="display:grid;grid-template-columns:1fr 1fr 1.4fr 30px;gap:6px;margin-bottom:6px" data-con="x">
-    <input class="tc-n" placeholder="Name" value="${esc(c[0])}"><input class="tc-m" placeholder="Mobile" value="${esc(c[1])}"><input class="tc-e" placeholder="Email" value="${esc(c[2])}">
+  return `<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1.4fr 30px;gap:6px;margin-bottom:6px" data-con="x">
+    <input class="tc-n" placeholder="Name" value="${esc(c[0]||'')}">
+    <input class="tc-d" placeholder="Designation" value="${esc(c[3]||'')}" list="desig-list">
+    <input class="tc-m" placeholder="Mobile" value="${esc(c[1]||'')}">
+    <input class="tc-e" placeholder="Email" value="${esc(c[2]||'')}">
     <button type="button" class="icon-btn" onclick="this.parentElement.remove()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>`;
 }
+/* the designations already used in your contacts, offered as suggestions */
+function desigList(){
+  const seen=new Map();
+  S.contacts.forEach(c=>{ const d=String(c[CF.DESIG]||'').trim(); if(d && !seen.has(d.toLowerCase())) seen.set(d.toLowerCase(), d); });
+  return `<datalist id="desig-list">${[...seen.values()].sort().map(d=>`<option value="${esc(d)}">`).join('')}</datalist>`;
+}
 function addTrackBU(){ document.getElementById('tk-bus').insertAdjacentHTML('beforeend', trackBURowHTML(['Fixings','0','No','No','No'])); }
-function addTrackContact(){ document.getElementById('tk-cons').insertAdjacentHTML('beforeend', trackConRowHTML(['','',''])); }
+
+function addTrackContact(){ document.getElementById('tk-cons').insertAdjacentHTML('beforeend', trackConRowHTML(['','','',''])); }
 function openTrackForm(id, presetName){
   const k = id ? S.tracking.find(x=>x[KF.ID]===id) : null;
   const d = k ? clone(k) : [nextId(S.tracking), presetName||'', 'B','Consultant','Bakr Mohamed',
@@ -2524,6 +2538,7 @@ function openTrackForm(id, presetName){
     <div id="tk-bus">${d[KF.BUS].map(trackBURowHTML).join('')}</div>
     <button type="button" class="btn sm" onclick="addTrackBU()">+ Add BU</button>
     <div class="m-sub">Contact persons</div>
+    ${desigList()}
     <div id="tk-cons">${d[KF.CONTACTS].map(trackConRowHTML).join('')}</div>
     <button type="button" class="btn sm" onclick="addTrackContact()">+ Add contact</button>
     <div class="m-sub">Vendor portal & notes</div>
@@ -2542,7 +2557,8 @@ function saveTrack(id){
     r.querySelector('.tk-bu').value, r.querySelector('.tk-st').value,
     ...[...r.querySelectorAll('.yn')].map(b=>b.classList.contains('on')?'Yes':'No')]);
   const cons=[...document.querySelectorAll('#tk-cons [data-con]')].map(r=>[
-    r.querySelector('.tc-n').value.trim(), r.querySelector('.tc-m').value.trim(), r.querySelector('.tc-e').value.trim()]).filter(c=>c[0]||c[2]);
+    r.querySelector('.tc-n').value.trim(), r.querySelector('.tc-m').value.trim(), r.querySelector('.tc-e').value.trim(),
+    (r.querySelector('.tc-d')||{value:''}).value.trim()]).filter(c=>c[0]||c[2]);
   if(!g('tk-name')) return toast('Consultant name is required', true);
   const prevNew = id ? (S.tracking.find(x=>x[KF.ID]===id)||[])[KF.NEW] : '';
   const rec=[id||nextId(S.tracking), g('tk-name'), g('tk-prio'), g('tk-type'), g('tk-h'), bus, cons, [g('tk-pw'),g('tk-pu'),g('tk-pp')], g('tk-nt'), prevNew||''];
@@ -6086,7 +6102,10 @@ function ensureTaskOrders(){
     if(n) setTimeout(()=>toast(n+' FiXperience date(s) filled in from the year. Open the FiXperience card to adjust them.'), 2600);
   }
   { const n=syncAllContactSbus(); if(n) setTimeout(()=>toast(n+' seminar SBU(s) copied from your contacts'), 2200); }
-  S.tracking.forEach(k=>{ while(k.length<10) k.push(''); });
+  S.tracking.forEach(k=>{
+    while(k.length<10) k.push('');
+    (k[KF.CONTACTS]||[]).forEach(p=>{ while(p.length<4) p.push(''); });
+  });
   /* start the contact-to-tracking rule from the newest contact on record */
   {
     const newest=S.contacts.reduce((m,c)=>(!m||c[CF.ID]>m[CF.ID])?c:m, null);
