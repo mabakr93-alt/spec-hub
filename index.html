@@ -1649,7 +1649,7 @@ function directoryAOA(opt){
   return out;
 }
 function openDirectory(){
-  const mine=!!(S.meta && S.meta.dirMine);
+  const mine = (S.meta && S.meta.dirMine!==false);
   const withOnly=!(S.meta && S.meta.dirAll);
   const rows=directoryRows({mineOnly:mine, withContactsOnly:withOnly});
   const people=rows.reduce((s,r)=>s+r.people.length,0);
@@ -1659,7 +1659,7 @@ function openDirectory(){
   document.getElementById('m-body').innerHTML=`
     <div class="filter-bar" style="margin-bottom:10px">
       <div class="chip-row">
-        <button class="chip ${mine?'on':''}" onclick="S.meta.dirMine=!${mine};save('meta');openDirectory()">Only my consultants</button>
+        <button class="chip ${mine?'on':''}" onclick="S.meta.dirMine=${mine?'false':'true'};save('meta');openDirectory()">Only my companies</button>
         <button class="chip ${withOnly?'on':''}" onclick="S.meta.dirAll=${withOnly?'true':'false'};save('meta');openDirectory()">Only those with a contact</button>
       </div>
       <span class="count-note"><b>${rows.length}</b> compan${rows.length===1?'y':'ies'} · <b>${people}</b> named contact${people===1?'':'s'}</span>
@@ -1684,6 +1684,7 @@ function openDirectory(){
     <button class="btn" onclick="closeModal()">Close</button>
     <button class="btn" onclick="copyDirectory()">📋 Copy as a table</button>
     <button class="btn primary" onclick="exportDirectory()">⬇ Excel for your manager</button>`;
+  document.getElementById('m-foot').insertAdjacentHTML('afterbegin','<span class="cell-sub" style="margin-right:auto">The Excel always carries your companies only</span>');
   document.getElementById('modal-back').classList.add('open');
 }
 function _dirOpt(){ return {mineOnly:!!(S.meta&&S.meta.dirMine), withContactsOnly:!(S.meta&&S.meta.dirAll)}; }
@@ -1691,17 +1692,181 @@ function copyDirectory(){
   const aoa=directoryAOA(_dirOpt());
   copyText(aoa.map(r=>r.join('\t')).join('\n'), 'directory');
 }
+/* ---- a real .xlsx written by hand, so it can carry fischer colours ----
+   The bundled spreadsheet library cannot write cell styles, so the workbook is
+   built here: a tiny ZIP writer plus the few XML parts Excel needs. */
+function _crcTable(){
+  if(_crcTable.t) return _crcTable.t;
+  const t=new Uint32Array(256);
+  for(let n=0;n<256;n++){ let c=n; for(let k=0;k<8;k++) c=(c&1)?(0xEDB88320^(c>>>1)):(c>>>1); t[n]=c>>>0; }
+  return (_crcTable.t=t);
+}
+function _crc32(u8){
+  const t=_crcTable(); let c=0xFFFFFFFF;
+  for(let i=0;i<u8.length;i++) c=t[(c^u8[i])&0xFF]^(c>>>8);
+  return (c^0xFFFFFFFF)>>>0;
+}
+function zipStore(files){
+  const enc=new TextEncoder();
+  const parts=[], central=[];
+  let offset=0;
+  const put=(arr)=>{ parts.push(arr); offset+=arr.length; };
+  const u16=v=>[v&255,(v>>8)&255];
+  const u32=v=>[v&255,(v>>8)&255,(v>>16)&255,(v>>24)&255];
+  files.forEach(f=>{
+    const name=enc.encode(f.name);
+    const data=typeof f.data==='string'? enc.encode(f.data) : f.data;
+    const crc=_crc32(data);
+    const local=offset;
+    put(new Uint8Array([0x50,0x4b,0x03,0x04, ...u16(20), ...u16(0), ...u16(0), ...u16(0), ...u16(0),
+      ...u32(crc), ...u32(data.length), ...u32(data.length), ...u16(name.length), ...u16(0)]));
+    put(name); put(data);
+    central.push(new Uint8Array([0x50,0x4b,0x01,0x02, ...u16(20), ...u16(20), ...u16(0), ...u16(0), ...u16(0), ...u16(0),
+      ...u32(crc), ...u32(data.length), ...u32(data.length), ...u16(name.length),
+      ...u16(0), ...u16(0), ...u16(0), ...u16(0), ...u32(0), ...u32(local)]));
+    central[central.length-1]=concatU8([central[central.length-1], name]);
+  });
+  const cdStart=offset;
+  central.forEach(c=>put(c));
+  const cdSize=offset-cdStart;
+  put(new Uint8Array([0x50,0x4b,0x05,0x06, ...u16(0), ...u16(0), ...u16(files.length), ...u16(files.length),
+    ...u32(cdSize), ...u32(cdStart), ...u16(0)]));
+  return concatU8(parts);
+}
+function concatU8(list){
+  let n=0; list.forEach(a=>n+=a.length);
+  const out=new Uint8Array(n); let p=0;
+  list.forEach(a=>{ out.set(a,p); p+=a.length; });
+  return out;
+}
+function xesc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function colName(i){ let s=''; i++; while(i>0){ const m=(i-1)%26; s=String.fromCharCode(65+m)+s; i=Math.floor((i-1)/26); } return s; }
+/* style ids used below:
+   0 normal · 1 title · 2 subtitle · 3 header · 4 body · 5 body alt
+   6 developer · 7 authority · 8 consultant band · 9 prio A · 10 prio B · 11 prio C · 12 group title */
+function xlsxStyles(){
+  const font=(sz,b,color,name)=>`<font><sz val="${sz}"/>${b?'<b/>':''}<color rgb="FF${color}"/><name val="${name||'Calibri'}"/></font>`;
+  const fill=c=>c?`<fill><patternFill patternType="solid"><fgColor rgb="FF${c}"/><bgColor indexed="64"/></patternFill></fill>`:'<fill><patternFill patternType="none"/></fill>';
+  const thin='<left style="thin"><color rgb="FFD6DCE4"/></left><right style="thin"><color rgb="FFD6DCE4"/></right><top style="thin"><color rgb="FFD6DCE4"/></top><bottom style="thin"><color rgb="FFD6DCE4"/></bottom>';
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+<fonts count="8">${font(11,0,'242424')}${font(18,1,'E2001A')}${font(10,0,'6B7280')}${font(11,1,'FFFFFF')}${font(11,1,'1F3864')}${font(11,1,'E2001A')}${font(11,1,'0B5394')}${font(11,0,'242424')}</fonts>
+<fills count="9">${fill('')}${fill('')}${fill('E2001A')}${fill('FFFFFF')}${fill('F7F9FC')}${fill('FFF3D6')}${fill('E3F0FB')}${fill('FDECEE')}${fill('EFF9F2')}</fills>
+<borders count="2"><border/><border>${thin}</border></borders>
+<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
+<cellXfs count="13">
+<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
+<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"><alignment vertical="center"/></xf>
+<xf numFmtId="0" fontId="2" fillId="0" borderId="0" xfId="0" applyFont="1"/>
+<xf numFmtId="0" fontId="3" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>
+<xf numFmtId="0" fontId="0" fillId="3" borderId="1" xfId="0" applyFill="1" applyBorder="1" applyAlignment="1"><alignment vertical="top" wrapText="1"/></xf>
+<xf numFmtId="0" fontId="0" fillId="4" borderId="1" xfId="0" applyFill="1" applyBorder="1" applyAlignment="1"><alignment vertical="top" wrapText="1"/></xf>
+<xf numFmtId="0" fontId="0" fillId="5" borderId="1" xfId="0" applyFill="1" applyBorder="1" applyAlignment="1"><alignment vertical="top" wrapText="1"/></xf>
+<xf numFmtId="0" fontId="0" fillId="6" borderId="1" xfId="0" applyFill="1" applyBorder="1" applyAlignment="1"><alignment vertical="top" wrapText="1"/></xf>
+<xf numFmtId="0" fontId="0" fillId="3" borderId="1" xfId="0" applyFill="1" applyBorder="1" applyAlignment="1"><alignment vertical="top" wrapText="1"/></xf>
+<xf numFmtId="0" fontId="5" fillId="7" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
+<xf numFmtId="0" fontId="4" fillId="5" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
+<xf numFmtId="0" fontId="7" fillId="3" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
+<xf numFmtId="0" fontId="6" fillId="6" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment vertical="center"/></xf>
+</cellXfs></styleSheet>`;
+}
+function xlsxSheet(rows, cols, freezeRow, autofilterRef){
+  const body=rows.map((r,ri)=>{
+    const cells=r.cells.map((c,ci)=>{
+      const ref=colName(ci)+(ri+1);
+      if(c==null || c.v==='' || c.v==null) return `<c r="${ref}" s="${c&&c.s||0}"/>`;
+      if(typeof c.v==='number') return `<c r="${ref}" s="${c.s||0}"><v>${c.v}</v></c>`;
+      return `<c r="${ref}" s="${c.s||0}" t="inlineStr"><is><t xml:space="preserve">${xesc(c.v)}</t></is></c>`;
+    }).join('');
+    return `<row r="${ri+1}"${r.h?` ht="${r.h}" customHeight="1"`:''}>${cells}</row>`;
+  }).join('');
+  const merges=[];
+  rows.forEach((r,ri)=>{ if(r.merge) merges.push(`<mergeCell ref="A${ri+1}:${colName(cols.length-1)}${ri+1}"/>`); });
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+<sheetViews><sheetView showGridLines="0" tabSelected="1" workbookViewId="0">
+<pane ySplit="${freezeRow}" topLeftCell="A${freezeRow+1}" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>
+<sheetFormatPr defaultRowHeight="15"/>
+<cols>${cols.map((w,i)=>`<col min="${i+1}" max="${i+1}" width="${w}" customWidth="1"/>`).join('')}</cols>
+<sheetData>${body}</sheetData>
+${merges.length?`<mergeCells count="${merges.length}">${merges.join('')}</mergeCells>`:''}
+${autofilterRef?`<autoFilter ref="${autofilterRef}"/>`:''}
+</worksheet>`;
+}
+function writeXlsx(filename, rows, cols, freezeRow, autofilterRef, sheetName){
+  const files=[
+    {name:'[Content_Types].xml', data:`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+<Default Extension="xml" ContentType="application/xml"/>
+<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
+</Types>`},
+    {name:'_rels/.rels', data:`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`},
+    {name:'xl/workbook.xml', data:`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+<sheets><sheet name="${xesc(sheetName||'Directory')}" sheetId="1" r:id="rId1"/></sheets></workbook>`},
+    {name:'xl/_rels/workbook.xml.rels', data:`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`},
+    {name:'xl/styles.xml', data:xlsxStyles()},
+    {name:'xl/worksheets/sheet1.xml', data:xlsxSheet(rows, cols, freezeRow, autofilterRef)}
+  ];
+  const blob=new Blob([zipStore(files)], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a'); a.href=url; a.download=filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url), 1500);
+}
 function exportDirectory(){
   try{
-    const aoa=directoryAOA(_dirOpt());
-    const wb=XLSX.utils.book_new();
-    const ws=XLSX.utils.aoa_to_sheet(aoa);
-    ws['!cols']=[6,34,20,7,24,22,16,30,16,26,12,9,30].map(w=>({wch:w}));
-    ws['!freeze']={xSplit:0,ySplit:1};
-    XLSX.utils.book_append_sheet(wb, ws, 'Directory');
-    XLSX.writeFile(wb, 'fischer_Consultants_and_Developers_'+stampNow()+'.xlsx');
-    logChange('Directory exported ('+(aoa.length-1)+' rows)', 'Contacts');
-    toast('Excel saved with '+(aoa.length-1)+' rows');
+    /* your companies only: Awni's and Aya's are left out */
+    const data=directoryRows({mineOnly:true, withContactsOnly:!(S.meta&&S.meta.dirAll)});
+    const COLS=[5, 34, 22, 6, 26, 24, 17, 32, 26, 12, 9, 28];
+    const HEAD=['#','Company / Office','Category','Prio','Contact person','Position','Mobile','Email',
+                'fischer registered for','Last seminar','Projects','Notes'];
+    const rows=[];
+    rows.push({cells:[{v:'fischer Saudi Arabia — Consultants, Developers and Authorities', s:1}], merge:1, h:26});
+    rows.push({cells:[{v:'Prepared by Mohamed Bakr, Sr. Specification Engineer · '+fmtDate(today())+' · '+data.length+' companies', s:2}], merge:1});
+    rows.push({cells:[]});
+    rows.push({cells:HEAD.map(h=>({v:h, s:3})), h:30});
+    const band={'Real-estate developer':6, 'Authority':7};
+    const prioStyle={'A':9,'B':10,'C':11};
+    let n=0, alt=false;
+    let lastType=null;
+    data.forEach(r=>{
+      if(r.type!==lastType){
+        lastType=r.type; alt=false;
+        rows.push({cells:[{v:r.type.toUpperCase()+'  —  '+data.filter(x=>x.type===r.type).length, s:12}], merge:1, h:22});
+      }
+      const base = band[r.type] || (alt?5:4);
+      alt=!alt;
+      const ps = r.people.length ? r.people : [{name:'',role:'',mobile:'',email:''}];
+      ps.forEach((p,i)=>{
+        rows.push({cells:[
+          {v: i===0?++n:'', s:base},
+          {v: i===0?r.company:'', s:base},
+          {v: i===0?r.type:'', s:base},
+          {v: i===0?(r.prio||''):'', s: i===0?(prioStyle[r.prio]||base):base},
+          {v: p.name, s:base},
+          {v: p.role, s:base},
+          {v: p.mobile, s:base},
+          {v: p.email, s:base},
+          {v: i===0?r.registered:'', s:base},
+          {v: i===0?(r.seminar?fmtDate(r.seminar):''):'', s:base},
+          {v: i===0?(r.projects||''):'', s:base},
+          {v: i===0?r.notes:'', s:base}
+        ]});
+      });
+    });
+    const last=rows.length;
+    writeXlsx('fischer_Directory_MohamedBakr_'+stampNow()+'.xlsx', rows, COLS, 4, 'A4:'+colName(HEAD.length-1)+last, 'Directory');
+    logChange('Directory exported: '+data.length+' companies under your name', 'Contacts');
+    toast(data.length+' of your companies exported with fischer formatting');
   }catch(e){ toast('Export failed: '+e.message, true); }
 }
 function trackingContactGaps(){
