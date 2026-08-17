@@ -1486,6 +1486,7 @@ function renderContacts(){
     ${(()=>{const g=trackingContactGaps().length; return g?`<button class="btn sm" style="border-color:var(--red);color:var(--red)" onclick="openTrackingGaps()" title="People in Team Tracking with no card here${(FLT.gaps.mine!==false)?' (your consultants only)':''}">⚠ Missing here: ${g}</button>`:'';})()}
     <button class="btn sm" onclick="openFollowups('contacts')" title="Contacts with a seminar or FiXperience to follow up" style="position:relative">📞 Follow-ups <span id="fu-btn-cnt" class="pill p-red" style="margin-left:4px">${followupContacts().length}</span></button>
     <button class="btn sm" onclick="scanContactDups()" title="Find contacts sharing the same email, mobile, or name+company">Merge duplicates</button>
+    <button class="btn sm navy" onclick="openDirectory()" title="One list of every office and developer with the responsible engineer">📇 Directory report</button>
     <button class="btn sm" onclick="exportSheet('contacts')">Export sheet</button>
     <button class="btn primary sm" onclick="openContactForm()">+ Add contact</button>
   </div>
@@ -1572,6 +1573,137 @@ function syncContactToTracking(c){
 function isMyTracking(k){ return /bakr/i.test(String(k[KF.HANDLER]||'')); }
 function tgKey(k,p){ return k[KF.ID]+'|'+_norm(p[0])+'|'+String(p[2]||'').toLowerCase(); }
 function tgHidden(){ return (S.meta && S.meta.tgIgnored) || []; }
+/* ---- one directory of every office we know, with the responsible engineer ----
+   Pulls the company from Team Tracking, the people from both Team Tracking and
+   Contacts, and adds what fischer has achieved there, so it answers the question
+   without anyone needing to open three tabs. */
+function directoryRows(opt){
+  const o=opt||{};
+  const out=[];
+  const byType={'Consultant':'Consulting office','Developers':'Real-estate developer','Developer':'Real-estate developer',
+                'Authorities':'Authority','Contractor':'Contractor','Engineering Office':'Engineering office'};
+  S.tracking.forEach(k=>{
+    const co=String(k[KF.CONS]||'').trim();
+    if(!co) return;
+    if(o.mineOnly && !isMyTracking(k)) return;
+    /* people: those written on the tracking row, then anyone in Contacts for the same company */
+    const people=[], seen=new Set();
+    (k[KF.CONTACTS]||[]).forEach(p=>{
+      const nm=String(p[0]||'').trim(), em=String(p[2]||'').trim(), mo=String(p[1]||'').trim();
+      if(!nm && !em) return;
+      const key=(em||nm).toLowerCase();
+      if(seen.has(key)) return; seen.add(key);
+      people.push({name:nm, role:'', mobile:mo, email:em, src:'tracking'});
+    });
+    S.contacts.forEach(c=>{
+      if(!namesLikelySame(co, c[CF.COMPANY])) return;
+      const nm=String(c[CF.NAME]||'').trim(), em=String(c[CF.EMAIL]||'').trim(), mo=String(c[CF.MOBILE]||'').trim();
+      if(!nm && !em) return;
+      const key=(em||nm).toLowerCase();
+      const hit=people.find(p=>(p.email&&p.email.toLowerCase()===em.toLowerCase())||(p.name&&_norm(p.name)===_norm(nm)));
+      if(hit){ if(!hit.role) hit.role=String(c[CF.DESIG]||''); if(!hit.mobile) hit.mobile=mo; if(!hit.email) hit.email=em; return; }
+      if(seen.has(key)) return; seen.add(key);
+      people.push({name:nm, role:String(c[CF.DESIG]||''), mobile:mo, email:em, src:'contacts'});
+    });
+    if(o.withContactsOnly && !people.length) return;
+    /* what fischer has achieved there */
+    const v=S.vendors.find(x=>namesLikelySame(co, x[VF.COMPANY]));
+    const reg=v ? [...vendorSbuTags(v,'vl'), ...vendorSbuTags(v,'dr')] : [];
+    const sem=S.seminars.filter(s=>namesLikelySame(co, s[SF.NAME])).sort((a,b)=>(b[SF.DATE]||'')<(a[SF.DATE]||'')?-1:1)[0];
+    const jobs=S.projects.filter(p=>!projCancelled(p) && namesLikelySame(co, p[PF.CONS]));
+    out.push({
+      company:co,
+      type:byType[k[KF.TYPE]]||String(k[KF.TYPE]||'Consulting office'),
+      prio:k[KF.PRIO]||'',
+      handler:k[KF.HANDLER]||'',
+      people,
+      registered:reg.join(', '),
+      seminar: sem ? String(sem[SF.DATE]).slice(0,10) : '',
+      projects: jobs.length,
+      notes:String(k[KF.NOTES]||'')
+    });
+  });
+  const rank={'Real-estate developer':0,'Consulting office':1,'Engineering office':2,'Authority':3,'Contractor':4};
+  out.sort((a,b)=>(rank[a.type]??9)-(rank[b.type]??9)
+    || String(a.prio).localeCompare(String(b.prio))
+    || a.company.localeCompare(b.company));
+  return out;
+}
+function directoryAOA(opt){
+  const rows=directoryRows(opt);
+  const h=['#','Company / Office','Category','Priority','Contact person','Position','Mobile','Email',
+           'Handled by','fischer registered for','Last seminar','Live projects','Notes'];
+  const out=[h];
+  let n=0;
+  rows.forEach(r=>{
+    if(!r.people.length){
+      out.push([++n, r.company, r.type, r.prio, '', '', '', '', r.handler, r.registered, r.seminar, r.projects||'', r.notes]);
+      return;
+    }
+    r.people.forEach((p,i)=>{
+      out.push([ i===0?++n:'', i===0?r.company:'', i===0?r.type:'', i===0?r.prio:'',
+                 p.name, p.role, p.mobile, p.email,
+                 i===0?r.handler:'', i===0?r.registered:'', i===0?r.seminar:'', i===0?(r.projects||''):'', i===0?r.notes:'' ]);
+    });
+  });
+  return out;
+}
+function openDirectory(){
+  const mine=!!(S.meta && S.meta.dirMine);
+  const withOnly=!(S.meta && S.meta.dirAll);
+  const rows=directoryRows({mineOnly:mine, withContactsOnly:withOnly});
+  const people=rows.reduce((s,r)=>s+r.people.length,0);
+  const groups={};
+  rows.forEach(r=>{ (groups[r.type]=groups[r.type]||[]).push(r); });
+  document.getElementById('m-title').textContent='Directory of offices and developers';
+  document.getElementById('m-body').innerHTML=`
+    <div class="filter-bar" style="margin-bottom:10px">
+      <div class="chip-row">
+        <button class="chip ${mine?'on':''}" onclick="S.meta.dirMine=!${mine};save('meta');openDirectory()">Only my consultants</button>
+        <button class="chip ${withOnly?'on':''}" onclick="S.meta.dirAll=${withOnly?'true':'false'};save('meta');openDirectory()">Only those with a contact</button>
+      </div>
+      <span class="count-note"><b>${rows.length}</b> compan${rows.length===1?'y':'ies'} · <b>${people}</b> named contact${people===1?'':'s'}</span>
+    </div>
+    <div style="max-height:52vh;overflow:auto">
+      ${Object.keys(groups).map(t=>`<div class="doc-sec" style="margin-bottom:12px">
+        <h3>${esc(t)} — ${groups[t].length}</h3>
+        <table class="tbl"><thead><tr><th>Company</th><th style="width:56px">Prio</th><th>Contact</th><th style="width:130px">Mobile</th><th>Email</th></tr></thead><tbody>
+        ${groups[t].map(r=>{
+          const ps=r.people.length?r.people:[{name:'',role:'',mobile:'',email:''}];
+          return ps.map((p,i)=>`<tr>
+            <td>${i===0?`<div class="cell-main" dir="auto">${esc(r.company)}</div>${r.registered?`<div class="cell-sub">registered: ${esc(r.registered)}</div>`:''}`:''}</td>
+            <td>${i===0?`<span class="prio ${esc(r.prio||'C')}">${esc(r.prio||'-')}</span>`:''}</td>
+            <td><div style="font-size:12px" dir="auto">${esc(p.name)}</div><div class="cell-sub">${esc(p.role)}</div></td>
+            <td style="font-size:11.5px;white-space:nowrap">${esc(p.mobile)}</td>
+            <td style="font-size:11.5px;word-break:break-all">${esc(p.email)}</td>
+          </tr>`).join('');
+        }).join('')}
+        </tbody></table></div>`).join('')}
+    </div>`;
+  document.getElementById('m-foot').innerHTML=`
+    <button class="btn" onclick="closeModal()">Close</button>
+    <button class="btn" onclick="copyDirectory()">📋 Copy as a table</button>
+    <button class="btn primary" onclick="exportDirectory()">⬇ Excel for your manager</button>`;
+  document.getElementById('modal-back').classList.add('open');
+}
+function _dirOpt(){ return {mineOnly:!!(S.meta&&S.meta.dirMine), withContactsOnly:!(S.meta&&S.meta.dirAll)}; }
+function copyDirectory(){
+  const aoa=directoryAOA(_dirOpt());
+  copyText(aoa.map(r=>r.join('\t')).join('\n'), 'directory');
+}
+function exportDirectory(){
+  try{
+    const aoa=directoryAOA(_dirOpt());
+    const wb=XLSX.utils.book_new();
+    const ws=XLSX.utils.aoa_to_sheet(aoa);
+    ws['!cols']=[6,34,20,7,24,22,16,30,16,26,12,9,30].map(w=>({wch:w}));
+    ws['!freeze']={xSplit:0,ySplit:1};
+    XLSX.utils.book_append_sheet(wb, ws, 'Directory');
+    XLSX.writeFile(wb, 'fischer_Consultants_and_Developers_'+stampNow()+'.xlsx');
+    logChange('Directory exported ('+(aoa.length-1)+' rows)', 'Contacts');
+    toast('Excel saved with '+(aoa.length-1)+' rows');
+  }catch(e){ toast('Export failed: '+e.message, true); }
+}
 function trackingContactGaps(){
   const mineOnly = !(FLT.gaps && FLT.gaps.mine===false);
   const out=[];
@@ -2135,6 +2267,7 @@ function renderTracking(){
       <input placeholder="Search consultant…" value="${esc(f.q)}" oninput="onSearch('tracking',this,renderTracking)"></div>
     <span class="count-note">${rows.length} consultants${S.tracking.filter(x=>x[KF.NEW]).length?` · <span class="due-late">${S.tracking.filter(x=>x[KF.NEW]).length} new from contacts, in red until you press ✓</span>`:''}</span>
     ${(()=>{const g=trackingContactGaps().length; return g?`<button class="btn sm" style="border-color:var(--red);color:var(--red)" onclick="openTrackingGaps()" title="People with no card in Contacts${(FLT.gaps.mine!==false)?' (your consultants only)':''}">⚠ Not in Contacts: ${g}</button>`:'';})()}
+    <button class="btn sm navy" onclick="openDirectory()" title="One list of every office and developer with the responsible engineer">📇 Directory report</button>
     <button class="btn sm" onclick="exportSheet('tracking')">Export sheet</button>
     <button class="btn primary sm" onclick="openTrackForm()">+ Add consultant</button>
   </div>
