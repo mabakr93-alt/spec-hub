@@ -1743,20 +1743,23 @@ function xesc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g
 function colName(i){ let s=''; i++; while(i>0){ const m=(i-1)%26; s=String.fromCharCode(65+m)+s; i=Math.floor((i-1)/26); } return s; }
 /* style ids used below:
    0 normal · 1 title · 2 subtitle · 3 header · 4 body · 5 body alt
-   6 developer · 7 authority · 8 consultant band · 9 prio A · 10 prio B · 11 prio C · 12 group title */
+   6 developer · 7 authority · 8 consultant band · 9 prio A · 10 prio B · 11 prio C
+   13 developer banner · 14 authority banner · 15 consulting banner */
 function xlsxStyles(){
   const font=(sz,b,color,name)=>`<font><sz val="${sz}"/>${b?'<b/>':''}<color rgb="FF${color}"/><name val="${name||'Calibri'}"/></font>`;
   const fill=c=>c?`<fill><patternFill patternType="solid"><fgColor rgb="FF${c}"/><bgColor indexed="64"/></patternFill></fill>`:'<fill><patternFill patternType="none"/></fill>';
   const thin='<left style="thin"><color rgb="FFD6DCE4"/></left><right style="thin"><color rgb="FFD6DCE4"/></right><top style="thin"><color rgb="FFD6DCE4"/></top><bottom style="thin"><color rgb="FFD6DCE4"/></bottom>';
+  /* Excel is strict: fill 0 must be none and fill 1 must be gray125, and the
+     cellStyles, dxfs and tableStyles blocks must exist or it offers to repair. */
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
 <fonts count="8">${font(11,0,'242424')}${font(18,1,'E2001A')}${font(10,0,'6B7280')}${font(11,1,'FFFFFF')}${font(11,1,'1F3864')}${font(11,1,'E2001A')}${font(11,1,'0B5394')}${font(11,0,'242424')}</fonts>
-<fills count="9">${fill('')}${fill('')}${fill('E2001A')}${fill('FFFFFF')}${fill('F7F9FC')}${fill('FFF3D6')}${fill('E3F0FB')}${fill('FDECEE')}${fill('EFF9F2')}</fills>
-<borders count="2"><border/><border>${thin}</border></borders>
+<fills count="9"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill>${fill('E2001A')}${fill('FFFFFF')}${fill('F7F9FC')}${fill('FFF3D6')}${fill('E3F0FB')}${fill('FDECEE')}${fill('EFF9F2')}</fills>
+<borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border><border>${thin}<diagonal/></border></borders>
 <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
-<cellXfs count="13">
+<cellXfs count="16">
 <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
-<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"><alignment vertical="center"/></xf>
+<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1"><alignment vertical="center"/></xf>
 <xf numFmtId="0" fontId="2" fillId="0" borderId="0" xfId="0" applyFont="1"/>
 <xf numFmtId="0" fontId="3" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>
 <xf numFmtId="0" fontId="0" fillId="3" borderId="1" xfId="0" applyFill="1" applyBorder="1" applyAlignment="1"><alignment vertical="top" wrapText="1"/></xf>
@@ -1768,7 +1771,14 @@ function xlsxStyles(){
 <xf numFmtId="0" fontId="4" fillId="5" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
 <xf numFmtId="0" fontId="7" fillId="3" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
 <xf numFmtId="0" fontId="6" fillId="6" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment vertical="center"/></xf>
-</cellXfs></styleSheet>`;
+<xf numFmtId="0" fontId="4" fillId="5" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment vertical="center"/></xf>
+<xf numFmtId="0" fontId="6" fillId="6" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment vertical="center"/></xf>
+<xf numFmtId="0" fontId="4" fillId="4" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment vertical="center"/></xf>
+</cellXfs>
+<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
+<dxfs count="0"/>
+<tableStyles count="0" defaultTableStyle="TableStyleMedium2" defaultPivotStyle="PivotStyleLight16"/>
+</styleSheet>`;
 }
 function xlsxSheet(rows, cols, freezeRow, autofilterRef){
   const body=rows.map((r,ri)=>{
@@ -1789,8 +1799,8 @@ function xlsxSheet(rows, cols, freezeRow, autofilterRef){
 <sheetFormatPr defaultRowHeight="15"/>
 <cols>${cols.map((w,i)=>`<col min="${i+1}" max="${i+1}" width="${w}" customWidth="1"/>`).join('')}</cols>
 <sheetData>${body}</sheetData>
-${merges.length?`<mergeCells count="${merges.length}">${merges.join('')}</mergeCells>`:''}
 ${autofilterRef?`<autoFilter ref="${autofilterRef}"/>`:''}
+${merges.length?`<mergeCells count="${merges.length}">${merges.join('')}</mergeCells>`:''}
 </worksheet>`;
 }
 function writeXlsx(filename, rows, cols, freezeRow, autofilterRef, sheetName){
@@ -1808,6 +1818,7 @@ function writeXlsx(filename, rows, cols, freezeRow, autofilterRef, sheetName){
 <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`},
     {name:'xl/workbook.xml', data:`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+<workbookPr/><bookViews><workbookView xWindow="0" yWindow="0" windowWidth="20000" windowHeight="12000"/></bookViews>
 <sheets><sheet name="${xesc(sheetName||'Directory')}" sheetId="1" r:id="rId1"/></sheets></workbook>`},
     {name:'xl/_rels/workbook.xml.rels', data:`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
@@ -1841,7 +1852,9 @@ function exportDirectory(){
     data.forEach(r=>{
       if(r.type!==lastType){
         lastType=r.type; alt=false;
-        rows.push({cells:[{v:r.type.toUpperCase()+'  —  '+data.filter(x=>x.type===r.type).length, s:12}], merge:1, h:22});
+        const bs = r.type==='Real-estate developer' ? 13 : (r.type==='Authority' ? 14 : 15);
+        rows.push({cells:[{v:r.type.toUpperCase()+'  —  '+data.filter(x=>x.type===r.type).length+' companies', s:bs},
+          ...Array(11).fill({v:'', s:bs})], h:22});
       }
       const base = band[r.type] || (alt?5:4);
       alt=!alt;
