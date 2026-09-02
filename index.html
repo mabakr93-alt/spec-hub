@@ -2069,27 +2069,92 @@ function applyValueImport(){
   toast(n+' customer value(s) loaded. The deck will now show their potential.');
 }
 /* ---- photographs for the Success story slide ---- */
+/* ---- success stories: as many as you need, each with its own photographs ---- */
+function stories(){ S.slides.stories = S.slides.stories || []; return S.slides.stories; }
+function addStory(){
+  stories().push({topic:'', client:'', project:'', sbu:'', process:'', outcome:'', photos:[]});
+  save('slides'); openSuccessPhotos();
+}
+function removeStory(i){
+  const s=stories()[i];
+  (s&&s.photos||[]).forEach(id=>{ if(imgStore()[id]) delete imgStore()[id]; });
+  stories().splice(i,1); save('images'); save('slides'); openSuccessPhotos();
+}
+function setStoryField(i, f, v){
+  const s=stories()[i]; if(!s) return;
+  s[f]=v; save('slides');
+}
+/* a first draft of the outcome, built from the facts already in the hub */
+function draftOutcome(i){
+  const s=stories()[i]; if(!s) return;
+  const client=(s.client||'the client').trim();
+  const proj=(s.project||'').trim();
+  const sbu=(s.sbu||'').trim();
+  const p=S.projects.find(x=>proj && namesLikelySame(proj, x[PF.PROJ]));
+  const v=S.vendors.find(x=>client && namesLikelySame(client, x[VF.COMPANY]));
+  const val=p?(+p[PF.EXP]||0):0;
+  const app=p?String(p[PF.APP]||''):'';
+  const city=p?String(p[PF.CITY]||''):'';
+  const lines=[];
+  lines.push('fischer '+(sbu||'systems')+' specified'+(proj?' on '+proj:'')+(city?' in '+city:'')
+    +(client?' with '+client:'')+'.');
+  if(app) lines.push('Application: '+app+'.');
+  if(val) lines.push('Expected order value '+fmtSAR(val)+'.');
+  if(v){
+    const reg=[...vendorSbuTags(v,'vl'), ...vendorSbuTags(v,'dr')];
+    if(reg.length) lines.push('fischer is registered with '+v[VF.COMPANY]+' for '+reg.join(', ')+'.');
+  }
+  lines.push('Opens further scope with '+(client||'this customer')+' on the coming projects.');
+  s.outcome=lines.join('\n');
+  save('slides'); openSuccessPhotos();
+  toast('Draft written. Edit it in the box before the meeting.');
+}
 function openSuccessPhotos(){
-  const ids=(S.slides.successPhotos||[]);
-  document.getElementById('m-title').textContent='Photographs for the Success story slide';
-  document.getElementById('m-body').innerHTML=`
-    <div class="mini-note" style="margin-bottom:10px;line-height:1.7">Up to three photographs. They are shrunk before storing and land on the slide at full box size, so nothing has to be dropped in afterwards.</div>
-    <div style="display:flex;gap:10px;flex-wrap:wrap">
-      ${[0,1,2].map(i=>{
-        const d=ids[i] ? (S.images||{})[ids[i]] : null;
-        return `<div style="width:190px">
-          <div style="width:190px;height:110px;border:1px solid var(--fi-grey);background:var(--fi-grey20);display:flex;align-items:center;justify-content:center;overflow:hidden">
-            ${d?`<img src="${d}" style="width:100%;height:100%;object-fit:cover">`:'<span class="cell-sub">empty</span>'}
-          </div>
-          <div style="display:flex;gap:6px;margin-top:5px">
-            <button class="btn sm" style="flex:1" onclick="pickSuccessPhoto(${i})">${d?'Replace':'Add photo'}</button>
-            ${d?`<button class="btn sm ghost danger-line" onclick="removeSuccessPhoto(${i})">✕</button>`:''}
-          </div></div>`;}).join('')}
-    </div>`;
-  document.getElementById('m-foot').innerHTML='<button class="btn primary" onclick="closeModal()">Done</button>';
+  const list=stories();
+  document.getElementById('m-title').textContent='Success stories — '+list.length;
+  document.getElementById('m-body').innerHTML = `
+    <div class="mini-note" style="margin-bottom:10px;line-height:1.7">Each story becomes its own slide, with up to three photographs. Fill the fields and press <b>Draft the outcome</b> to get a first version written from what the hub already knows.</div>
+    ${list.length===0 ? '<div class="empty">No stories yet. Add the first one below.</div>' : ''}
+    ${list.map((s,i)=>`
+      <div class="doc-sec" style="margin-bottom:14px;border-left:3px solid var(--fi-red);padding-left:11px">
+        <h3>Story ${i+1}${s.client?' — '+esc(s.client):''}
+          <button class="btn sm ghost danger-line" style="margin-right:8px" onclick="removeStory(${i})">Remove</button></h3>
+        <div class="f-grid">
+          <div class="f-field"><label>Client name</label><input value="${esc(s.client||'')}" list="cons-list" onchange="setStoryField(${i},'client',this.value)"></div>
+          <div class="f-field"><label>Project</label><input value="${esc(s.project||'')}" onchange="setStoryField(${i},'project',this.value)"></div>
+          <div class="f-field"><label>SBU</label><input value="${esc(s.sbu||'')}" list="sbu-list" onchange="setStoryField(${i},'sbu',this.value)"></div>
+          <div class="f-field"><label>Topic</label><input value="${esc(s.topic||'')}" placeholder="what the story is about" onchange="setStoryField(${i},'topic',this.value)"></div>
+          <div class="f-field"><label>Photographs</label>
+            <select onchange="setStoryField(${i},'photoMode',this.value)">
+              <option value="full" ${(s.photoMode||'full')==='full'?'selected':''}>each on its own slide, full size</option>
+              <option value="inline" ${s.photoMode==='inline'?'selected':''}>small, on the story slide</option>
+            </select></div>
+          <div class="f-field full"><label>Outcome
+            <button class="btn sm" style="margin-right:8px" onclick="draftOutcome(${i})">✎ Draft the outcome</button></label>
+            <textarea style="min-height:92px" onchange="setStoryField(${i},'outcome',this.value)">${esc(s.outcome||'')}</textarea></div>
+        </div>
+        <div style="display:flex;gap:9px;flex-wrap:wrap;margin-top:8px">
+          ${[0,1,2].map(k=>{
+            const d=(s.photos||[])[k] ? (S.images||{})[s.photos[k]] : null;
+            return `<div style="width:168px">
+              <div style="width:168px;height:96px;border:1px solid var(--fi-grey);background:var(--fi-grey20);display:flex;align-items:center;justify-content:center;overflow:hidden">
+                ${d?`<img src="${d}" style="width:100%;height:100%;object-fit:cover">`:'<span class="cell-sub">empty</span>'}
+              </div>
+              <div style="display:flex;gap:5px;margin-top:5px">
+                <button class="btn sm" style="flex:1" onclick="pickSuccessPhoto(${i},${k})">${d?'Replace':'Add photo'}</button>
+                ${d?`<button class="btn sm ghost danger-line" onclick="removeSuccessPhoto(${i},${k})">✕</button>`:''}
+              </div></div>`;}).join('')}
+        </div>
+      </div>`).join('')}
+    <datalist id="sbu-list">${SEED_DATA.options.sbu.map(o=>`<option value="${esc(o)}">`).join('')}</datalist>
+    ${consDatalist()}`;
+  document.getElementById('m-foot').innerHTML=`
+    <button class="btn" onclick="closeModal()">Close</button>
+    <button class="btn navy" onclick="addStory()">+ Add a story</button>
+    <button class="btn primary" onclick="closeModal();renderSlides()">Done</button>`;
   document.getElementById('modal-back').classList.add('open');
 }
-function pickSuccessPhoto(slot){
+function pickSuccessPhoto(story, slot){
   const el=document.createElement('input');
   el.type='file'; el.accept='image/*';
   el.style.cssText='position:absolute;left:-9999px';
@@ -2099,21 +2164,23 @@ function pickSuccessPhoto(slot){
     if(!f) return;
     try{
       toast('Preparing the photograph…');
-      const data=await shrinkImage(f);
+      const m=await shrinkImageMeta(f);
       const id='p'+Date.now().toString(36)+Math.random().toString(36).slice(2,5);
-      imgStore()[id]=data; save('images');
-      S.slides.successPhotos = S.slides.successPhotos || [];
-      S.slides.successPhotos[slot]=id;
+      imgStore()[id]=m.data; imgDims()[id]={w:m.w, h:m.h};
+      save('images'); save('meta');
+      const s=stories()[story]; if(!s) return;
+      s.photos = s.photos || [];
+      s.photos[slot]=id;
       save('slides'); openSuccessPhotos();
       logChange('Success story photograph added', 'Slides');
     }catch(e){ toast('Could not add that picture: '+e.message, true); }
   };
   el.click();
 }
-function removeSuccessPhoto(slot){
-  const arr=S.slides.successPhotos||[];
-  const id=arr[slot];
-  arr[slot]='';
+function removeSuccessPhoto(story, slot){
+  const s=stories()[story]; if(!s) return;
+  const id=(s.photos||[])[slot];
+  s.photos[slot]='';
   if(id && imgStore()[id]){ delete imgStore()[id]; save('images'); }
   save('slides'); openSuccessPhotos();
 }
@@ -5334,9 +5401,11 @@ function deleteNote(btn){
    with your data through sync, backup and Excel-free restore. */
 const IMG_MAXPX=1100, IMG_QUALITY=0.62, IMG_WARN=3*1024*1024;
 function imgStore(){ S.images = S.images || {}; return S.images; }
+function imgDims(){ S.meta.imgDims = S.meta.imgDims || {}; return S.meta.imgDims; }
 function imgBytes(){ return Object.values(imgStore()).reduce((s,v)=>s+String(v).length*0.75,0); }
 function fmtKB(b){ return b>1048576 ? (b/1048576).toFixed(1)+' MB' : Math.round(b/1024)+' KB'; }
-function shrinkImage(file){
+function shrinkImage(file){ return shrinkImageMeta(file).then(r=>r.data); }
+function shrinkImageMeta(file){
   return new Promise((res,rej)=>{
     const fr=new FileReader();
     fr.onerror=()=>rej(new Error('could not read the file'));
@@ -5349,7 +5418,7 @@ function shrinkImage(file){
         w=Math.round(w*sc); h=Math.round(h*sc);
         const c=document.createElement('canvas'); c.width=w; c.height=h;
         c.getContext('2d').drawImage(im,0,0,w,h);
-        res(c.toDataURL('image/jpeg', IMG_QUALITY));
+        res({data:c.toDataURL('image/jpeg', IMG_QUALITY), w, h});
       };
       im.src=fr.result;
     };
@@ -6281,36 +6350,64 @@ async function buildPPT(){
       }
     }
 
-    /* ---------- 7 success story ---------- */
+    /* ---------- 7 success stories, with the photographs on their own slides ---------- */
     {
-      const ss=S.slides.success||{};
-      const box=(id,x,yy,w,h,label,text)=>
-        pRect(id, x, yy, w, PX(0.02), FI_BLACK)
-        + pTextBox(id+1,'l'+id, x, yy+PX(0.07), w, PX(0.26), pPara(pRun(label,{size:11,bold:true,color:FI_RED})))
-        + pTextBox(id+2,'t'+id, x, yy+PX(0.36), w, h-PX(0.4), pPara(pRun(text||' ',{size:10,color:FI_BLACK})));
-      const colW=PX(4.42), gap=PX(0.26), rowH=PX(0.86);
-      const top=PX(1.02);
-      const body=[
-        box(20, M, top, colW, rowH, 'Topic', ss.topic),
-        box(30, M+colW+gap, top, colW, rowH, 'Customer', ss.customer),
-        box(40, M, top+rowH+PX(0.22), colW, rowH, 'Process', ss.process),
-        box(50, M+colW+gap, top+rowH+PX(0.22), colW, rowH, 'Outcome', ss.outcome),
-        pRect(60, M, PX(2.86), CW, PX(0.007), FI_GREY),
-        pTextBox(61,'ph', M, PX(2.90), CW, PX(0.22),
-          pPara(pRun('Photographs',{size:9,color:FI_BLACK}))),
-        (()=>{
-          const ids=(S.slides.successPhotos||[]).slice(0,3);
-          const boxW=PX(2.94), boxH=PX(1.72), yy=PX(3.16);
-          let out='', id=62;
-          for(let i=0;i<3;i++){
-            const x=M+i*(boxW+PX(0.14));
-            out += ids[i] ? pPic(id++, 'rIdP'+i, x, yy, boxW, boxH)
-                          : pRect(id++, x, yy, boxW, boxH, FI_GREY20);
-          }
-          return out;
-        })()
-      ].join('');
-      slides.push(Object.assign(page('Success story', body), {photos:(S.slides.successPhotos||[]).slice(0,3)}));
+      const list=(S.slides.stories||[]).filter(s=>s.client||s.project||s.outcome||(s.photos||[]).filter(Boolean).length);
+      const useList = list.length ? list : [{client:'',project:'',sbu:'',outcome:'',photos:[]}];
+      useList.forEach((ss,si)=>{
+        const pics=(ss.photos||[]).filter(Boolean).slice(0,3);
+        const full=(ss.photoMode||'full')!=='inline';
+        const fact=(id,x,yy,w,label,text)=>
+          pRect(id, x, yy, w, PX(0.02), FI_BLACK)
+          + pTextBox(id+1,'l'+id, x, yy+PX(0.06), w, PX(0.24), pPara(pRun(label,{size:10,bold:true,color:FI_RED})))
+          + pTextBox(id+2,'t'+id, x, yy+PX(0.32), w, PX(0.46), pPara(pRun(text||'—',{size:11,bold:true,color:FI_BLACK})));
+        const colW=Math.round((CW-2*PX(0.22))/3), top=PX(0.95);
+        const outH = full ? PX(2.6) : PX(0.95);
+        const body=[
+          fact(20, M, top, colW, 'Client', ss.client),
+          fact(30, M+colW+PX(0.22), top, colW, 'Project', ss.project),
+          fact(40, M+2*(colW+PX(0.22)), top, colW, 'SBU', ss.sbu),
+          pRect(50, M, PX(1.85), CW, PX(0.02), FI_BLACK),
+          pTextBox(51,'ol', M, PX(1.91), CW, PX(0.24), pPara(pRun('Outcome',{size:10,bold:true,color:FI_RED}))),
+          pTextBox(52,'ot', M, PX(2.17), CW, outH,
+            (String(ss.outcome||'').split(/\n/).filter(Boolean).slice(0, full?9:5)
+              .map(t=>pPara(pRun(t,{size:full?12:10.5,color:FI_BLACK}))).join('') || pPara(pRun('—',{size:11,color:FI_GREY})))),
+          full ? (pics.length? pTextBox(60,'pn', M, PPT_H-PX(0.78), CW, PX(0.24),
+                    pPara(pRun(pics.length+' photograph'+(pics.length>1?'s':'')+' on the following '+(pics.length>1?'slides':'slide'),
+                      {size:9,color:FI_GREY}))) : '')
+               : (()=>{
+                   const boxW=PX(2.94), boxH=PX(1.72), yy=PX(3.22);
+                   let out='', id=62;
+                   for(let k=0;k<3;k++){
+                     const x=M+k*(boxW+PX(0.14));
+                     out += pics[k] ? pPic(id++, 'rIdP'+k, x, yy, boxW, boxH)
+                                    : pRect(id++, x, yy, boxW, boxH, FI_GREY20);
+                   }
+                   return out;
+                 })()
+        ].join('');
+        const label='Success story'+(useList.length>1?'  ('+(si+1)+' of '+useList.length+')':'')
+          +(ss.topic?' — '+ss.topic:'');
+        slides.push(Object.assign(page(label, body), {photos: full? [] : pics}));
+
+        /* one slide per photograph, sized to fill the page without distortion */
+        if(full) pics.forEach((pid,k)=>{
+          const d=(S.meta.imgDims||{})[pid] || {w:4, h:3};
+          const availW=PPT_W-2*M, availH=PPT_H-PX(0.95)-PX(0.95);   /* clear of the title and the caption */
+          const sc=Math.min(availW/d.w, availH/d.h);
+          const w=Math.round(d.w*sc), h=Math.round(d.h*sc);
+          const x=Math.round((PPT_W-w)/2), yy=PX(0.95)+Math.round((availH-h)/2);
+          const cap=[ss.client, ss.project, ss.sbu].filter(Boolean).join('   ·   ');
+          const body2=[
+            pPic(20,'rIdP0', x, yy, w, h),
+            cap? pTextBox(21,'cap', M, PPT_H-PX(0.76), CW, PX(0.26),
+                  pPara(pRun(cap,{size:10,color:FI_BLACK}))) : ''
+          ].join('');
+          slides.push(Object.assign(
+            page((ss.topic||ss.client||'Success story')+(pics.length>1?'  —  photograph '+(k+1)+' of '+pics.length:''), body2),
+            {photos:[pid]}));
+        });
+      });
     }
 
     /* ---------- 8 support required ---------- */
@@ -6924,6 +7021,15 @@ function ensureTaskOrders(){
   S.slides.support = S.slides.support || [];
   S.slides.working = S.slides.working || {mode:'auto', picks:[], custom:[]};
   S.slides.successPhotos = S.slides.successPhotos || [];
+  /* one success story became many: keep whatever was already written */
+  if(!Array.isArray(S.slides.stories)){
+    const old=S.slides.success||{};
+    S.slides.stories = (old.topic||old.customer||old.process||old.outcome||(S.slides.successPhotos||[]).length)
+      ? [{topic:old.topic||'', client:old.customer||'', project:'', sbu:'', process:old.process||'',
+          outcome:old.outcome||'', photos:(S.slides.successPhotos||[]).filter(Boolean)}]
+      : [];
+    save('slides');
+  }
   S.projects.forEach(p=>{ while(p.length<23) p.push(''); });
   if(S.slides.success && S.slides.success.title!==undefined){
     S.slides.success={topic:S.slides.success.title||'', customer:'', process:'', outcome:S.slides.success.outcomes||''};
