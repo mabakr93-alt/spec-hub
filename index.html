@@ -2270,7 +2270,9 @@ function openWorkingPicker(){
 
     <div class="doc-sec" style="margin-bottom:12px">
       <h3>On the slide now — ${chosen.length}
-        ${cfg.mode==='manual'?'<button class="btn sm" style="margin-right:8px" onclick="sortWorkingByValue()">Sort by value</button>':''}</h3>
+        ${cfg.mode==='manual'
+          ? '<button class="btn sm" style="margin-right:8px" onclick="sortWorkingByValue()">Sort by value</button>'
+          : '<button class="btn sm primary" style="margin-right:8px" onclick="adoptAutoList()">+ Add a row to this list</button>'}</h3>
       ${chosen.length? `<div class="tbl-wrap" style="overflow-x:auto"><table class="tbl" style="table-layout:fixed;width:100%"><thead><tr><th style="width:26px">#</th><th style="width:30%">Company</th><th style="width:12%">Type</th><th style="width:14%">Business unit</th><th style="width:13%">Stage</th><th style="width:16%;text-align:right">Value SAR</th>${cfg.mode==='manual'?'<th style="width:11%"></th>':''}</tr></thead><tbody>
         ${chosen.map((r,i)=>`<tr>
           <td class="num">${i+1}</td>
@@ -2390,6 +2392,19 @@ function filterWorkingList(q){
   S.meta.wpQ=q;
   const el=document.getElementById('wp-list');
   if(el) el.innerHTML=workingListHtml(q);
+}
+/* Automatic is a derived list, so adding to it means taking a copy of it first.
+   The rows on the slide are kept exactly as they are, and the add list opens. */
+function adoptAutoList(){
+  const cfg=workingCfg();
+  const rows=workingRows();
+  cfg.picks=rows.filter(r=>r.key).map(r=>r.key);
+  cfg.custom=rows.filter(r=>!r.key).map(r=>({name:r.name,type:r.type,bu:r.bu,stage:r.stage,val:r.val}));
+  cfg.mode='manual';
+  save('slides');
+  openWorkingPicker();
+  toast('The '+rows.length+' automatic rows are now yours to edit. Add from the list below.');
+  setTimeout(()=>{ const el=document.getElementById('wp-q'); if(el) el.focus(); }, 80);
 }
 function setWorkingMode(m){ workingCfg().mode=m; save('slides'); openWorkingPicker(); }
 function toggleWorkingPick(key){
