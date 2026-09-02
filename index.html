@@ -2567,6 +2567,65 @@ function exportTeamXlsx(){
     toast(S.team.length+' colleagues exported');
   }catch(e){ toast('Export failed: '+e.message, true); }
 }
+/* ---- the leads, split by project type, as a formatted workbook ---- */
+function exportLeadsByType(){
+  try{
+    const y=curYear();
+    const live=S.projects.filter(p=>!projCancelled(p) && String(p[PF.YEAR])===y);
+    const groups=[
+      ['Specifications converted', live.filter(p=>String(p[PF.TYPE])==='Specifications converted')],
+      ['Sales Lead',              live.filter(p=>String(p[PF.TYPE])==='Sales Lead')],
+      ['Type not set yet',        live.filter(p=>!['Specifications converted','Sales Lead'].includes(String(p[PF.TYPE])))]
+    ];
+    const COLS=[5, 26, 30, 26, 20, 13, 15, 8, 12, 13, 20, 26];
+    const HEAD=['#','Consultant / client','Project','Application','SBU','City',
+                'Expected (SAR)','PO','Invoiced','Lead added','Status','Contractor'];
+    const rows=[];
+    rows.push({cells:[{v:'fischer Saudi Arabia — leads by project type, '+y, s:1}], merge:1, h:26});
+    rows.push({cells:[{v:'Prepared by Mohamed Bakr · '+fmtDate(today())+' · '+live.length+' live projects, cancelled ones excluded', s:2}], merge:1});
+    rows.push({cells:[]});
+    rows.push({cells:HEAD.map(h=>({v:h, s:3})), h:28});
+    let n=0, grand=0;
+    groups.forEach(([label, list])=>{
+      const sum=list.reduce((s,p)=>s+(+p[PF.EXP]||0),0);
+      grand+=sum;
+      const band = label==='Specifications converted' ? 13 : (label==='Sales Lead' ? 14 : 15);
+      rows.push({cells:[{v:label.toUpperCase()+'  —  '+list.length+(list.length===1?' project':' projects')
+          +(sum?'  ·  '+fmtNum(sum)+' SAR':''), s:band},
+        ...Array(HEAD.length-1).fill({v:'', s:band})], h:22});
+      if(!list.length){
+        rows.push({cells:[{v:'', s:4},{v:'none', s:4}, ...Array(HEAD.length-2).fill({v:'', s:4})]});
+        return;
+      }
+      list.sort((a,b)=>(+b[PF.EXP]||0)-(+a[PF.EXP]||0)).forEach((p,i)=>{
+        const alt=(i%2)?5:4;
+        rows.push({cells:[
+          {v:++n, s:alt},
+          {v:p[PF.CONS]||'', s:alt},
+          {v:p[PF.PROJ]||'', s:alt},
+          {v:p[PF.APP]||'', s:alt},
+          {v:p[PF.SBU]||'', s:alt},
+          {v:p[PF.CITY]||'', s:alt},
+          {v:(+p[PF.EXP]||0)?fmtNum(+p[PF.EXP]):'', s:alt},
+          {v:p[PF.PO]||'', s: String(p[PF.PO])==='Yes'?24:alt},
+          {v:p[PF.INV]||'', s:alt},
+          {v:p[PF.ADDED]?fmtDate(p[PF.ADDED]):'', s:alt},
+          {v:p[PF.STATUS]||'', s:alt},
+          {v:p[PF.CONTR]||'', s:alt}
+        ]});
+      });
+      rows.push({cells:[{v:'', s:4},{v:'Subtotal — '+label, s:4},
+        ...Array(4).fill({v:'', s:4}), {v:fmtNum(sum), s:4}, ...Array(5).fill({v:'', s:4})]});
+    });
+    rows.push({cells:[]});
+    rows.push({cells:[{v:'', s:3},{v:'TOTAL, all types', s:3},
+      ...Array(4).fill({v:'', s:3}), {v:fmtNum(grand), s:3}, ...Array(5).fill({v:'', s:3})], h:22});
+    writeXlsx('fischer_Leads_by_type_'+y+'_'+stampNow()+'.xlsx', rows, COLS, 4,
+      'A4:'+colName(HEAD.length-1)+rows.length, 'Leads');
+    logChange('Leads exported by type ('+live.length+' projects)', 'Projects');
+    toast(live.length+' leads exported: '+groups.map(g=>g[1].length+' '+g[0].toLowerCase()).join(', '));
+  }catch(e){ toast('Export failed: '+e.message, true); }
+}
 function exportDirectory(){
   try{
     /* your companies only: Awni's and Aya's are left out */
@@ -3454,6 +3513,7 @@ function renderProjects(){
     <button class="btn sm" onclick="openTeamManager()" title="Sales colleagues, their positions and emails">👥 Sales team</button>
     ${(()=>{const g=projectCompanyGaps().length; return g?`<button class="btn sm" style="border-color:var(--red);color:var(--red)" onclick="openProjectLinker()" title="Consultants and clients that are not in your contacts or Team Tracking">⚠ Not linked: ${g}</button>`:'';})()}
     <button class="chip ${wide?'on':''}" onclick="FLT.projects.wide=!FLT.projects.wide;renderProjects()" title="Contractor, Status, City, Invoiced, Inv. value and Sales">${wide?'▤ Fewer columns':'▦ All columns'}</button>
+    <button class="btn sm navy" onclick="exportLeadsByType()" title="Excel split into specifications converted and sales leads">⬇ Leads by type</button>
     <button class="btn sm" onclick="exportSheet('projects')">Export sheet</button>
     <button class="btn primary sm" onclick="openProjectForm()">+ Add project</button>
   </div>
