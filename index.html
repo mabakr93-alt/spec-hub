@@ -2128,7 +2128,7 @@ function workingCandidates(){
   S.vendors.forEach(v=>BU_KEYS.forEach(k=>{
     const b=v[VF.BUS] && v[VF.BUS][k];
     const done=sbuVL(b)||sbuDR(b);
-    out.push({key:v[VF.ID]+'|'+k, co:v[VF.COMPANY],
+    out.push({key:v[VF.ID]+'|'+k, co:v[VF.COMPANY], type:v[VF.TYPE]||'',
       bu:BU_LABELS[k].replace('Hanger & Support','H&S'),
       stage: done ? (sbuVL(b)?'In the vendor list':'In the drawings') : sbuStage(b),
       registered: !!done, val: vendorPotential(v,k), cls: classOf(v[VF.TYPE], v[VF.PRIO])});
@@ -2141,20 +2141,23 @@ function workingRows(){
     return potentialSbus().map(p=>{
       const v=S.vendors.find(x=>_norm(x[VF.COMPANY])===_norm(p.co));
       const key=BU_KEYS.find(k=>BU_LABELS[k].replace('Hanger & Support','H&S')===p.sbu);
-      return {name:p.co, bu:p.sbu, stage:p.stage, val:v&&key?vendorPotential(v,key):0};
+      return {name:p.co, bu:p.sbu, stage:p.stage, type:v?v[VF.TYPE]:'', val:v&&key?vendorPotential(v,key):0};
     }).sort((a,b)=>b.val-a.val).slice(0,9);
   }
   const all=workingCandidates();
-  const picked=(cfg.picks||[]).map(k=>all.find(c=>c.key===k)).filter(Boolean)
-    .map(c=>({name:c.co, bu:c.bu, stage:c.stage, val:c.val}));
-  const custom=(cfg.custom||[]).map(c=>({name:c.name, bu:c.bu, stage:c.stage||'', val:+c.val||0}));
-  return [...picked, ...custom].sort((a,b)=>b.val-a.val).slice(0,12);   /* highest value first */
+  const picked=(cfg.picks||[]).map(k=>{
+    const c=all.find(x=>x.key===k);
+    return c ? {name:c.co, bu:c.bu, stage:c.stage, val:c.val, type:c.type, key:k} : null;
+  }).filter(Boolean);
+  const custom=(cfg.custom||[]).map((c,i)=>({name:c.name, bu:c.bu, stage:c.stage||'', val:+c.val||0, type:c.type||'', custom:i}));
+  const rows=[...picked, ...custom];
+  /* the order you set in the picker is the order on the slide */
+  return rows.slice(0,12);
 }
 function openWorkingPicker(){
   const cfg=workingCfg();
-  const all=workingCandidates();
-  const q=String((S.meta&&S.meta.wpQ)||'').toLowerCase();
-  const shown=q?all.filter(c=>(c.co+' '+c.bu+' '+c.stage).toLowerCase().includes(q)):all;
+  const chosen=workingRows();
+  const q=String((S.meta&&S.meta.wpQ)||'');
   document.getElementById('m-title').textContent='Rows for "Top vendor list, working on"';
   document.getElementById('m-body').innerHTML=`
     <div class="filter-bar" style="margin-bottom:9px">
@@ -2162,41 +2165,101 @@ function openWorkingPicker(){
         <button class="chip ${cfg.mode!=='manual'?'on':''}" onclick="setWorkingMode('auto')">Automatic — the Potential ones</button>
         <button class="chip ${cfg.mode==='manual'?'on':''}" onclick="setWorkingMode('manual')">I choose the rows</button>
       </div>
-      <span class="count-note">${cfg.mode==='manual'?((cfg.picks||[]).length+(cfg.custom||[]).length)+' selected, up to 12 fit the slide':'the slide follows your Potential markings'}</span>
+      <span class="count-note">${cfg.mode==='manual'?chosen.length+' on the slide, up to 12 fit':'the slide follows your Potential markings'}</span>
     </div>
-    ${cfg.mode!=='manual'?'<div class="mini-note">Switch to "I choose the rows" to pick freely, including companies already registered for another unit.</div>':`
-    <div class="f-field" style="margin-bottom:8px">
-      <input id="wp-q" placeholder="Search company or business unit…" value="${esc(q)}" oninput="filterWorkingList(this.value)">
+
+    <div class="doc-sec" style="margin-bottom:12px">
+      <h3>On the slide now — ${chosen.length}
+        ${cfg.mode==='manual'?'<button class="btn sm" style="margin-right:8px" onclick="sortWorkingByValue()">Sort by value</button>':''}</h3>
+      ${chosen.length? `<table class="tbl"><thead><tr><th style="width:26px">#</th><th>Company</th><th style="width:110px">Customer type</th><th style="width:110px">Business unit</th><th style="width:120px">Stage</th><th style="width:110px;text-align:right">Value SAR</th>${cfg.mode==='manual'?'<th style="width:96px"></th>':''}</tr></thead><tbody>
+        ${chosen.map((r,i)=>`<tr>
+          <td class="num">${i+1}</td>
+          <td style="font-size:12.5px;font-weight:700" dir="auto">${esc(r.name)}</td>
+          <td style="font-size:12px">${esc(r.type||'—')}</td>
+          <td style="font-size:12px">${esc(r.bu||'')}</td>
+          <td style="font-size:12px">${esc(r.stage||'')}</td>
+          <td style="text-align:right;font-size:12px">${r.val?fmtNum(r.val):'—'}</td>
+          ${cfg.mode==='manual'?`<td style="white-space:nowrap">
+            <button class="icon-btn" title="Move up" ${i===0?'disabled':''} onclick="moveWorkingRow(${i},-1)">▲</button>
+            <button class="icon-btn" title="Move down" ${i===chosen.length-1?'disabled':''} onclick="moveWorkingRow(${i},1)">▼</button>
+            <button class="icon-btn" title="Remove from the slide" onclick="dropWorkingRow(${i})">✕</button></td>`:''}
+        </tr>`).join('')}
+      </tbody></table>`
+      : '<div class="empty">Nothing on this slide yet.</div>'}
+      ${cfg.mode!=='manual'?'<div class="mini-note" style="margin-top:6px">This list follows the SBUs marked Potential. Switch to “I choose the rows” to arrange or remove them.</div>':''}
     </div>
-    <div id="wp-list" style="max-height:44vh;overflow:auto">${workingListHtml(q)}</div>
-    <div class="doc-sec" style="margin-top:10px"><h3>Rows typed by hand ${ (cfg.custom||[]).length? '('+cfg.custom.length+')':''}</h3>
-      ${(cfg.custom||[]).map((c,i)=>`<div style="display:flex;gap:7px;align-items:center;margin-bottom:5px">
-        <span style="flex:1;font-size:12.5px">${esc(c.name)} · ${esc(c.bu)} · ${esc(c.stage||'')} · ${c.val?fmtNum(c.val):'no value'}</span>
-        <button class="btn sm ghost danger-line" onclick="removeWorkingCustom(${i})">Remove</button></div>`).join('')}
-      <div style="display:grid;grid-template-columns:1.6fr 1fr 1fr 1fr auto;gap:6px;margin-top:6px">
-        <input id="wc-n" placeholder="Company"><input id="wc-b" placeholder="Business unit">
-        <input id="wc-s" placeholder="Stage"><input id="wc-v" placeholder="Value SAR" inputmode="numeric">
+
+    ${cfg.mode!=='manual'?'':`
+    <div class="doc-sec">
+      <h3>Add from the vendor list</h3>
+      <div class="f-field" style="margin-bottom:8px">
+        <input id="wp-q" placeholder="Search company or business unit…" value="${esc(q)}" oninput="filterWorkingList(this.value)">
+      </div>
+      <div id="wp-list" style="max-height:34vh;overflow:auto">${workingListHtml(q)}</div>
+    </div>
+    <div class="doc-sec" style="margin-top:10px"><h3>Or type a row by hand</h3>
+      <div style="display:grid;grid-template-columns:1.5fr 1fr 1fr 1fr 1fr auto;gap:6px">
+        <input id="wc-n" placeholder="Company"><input id="wc-t" placeholder="Customer type">
+        <input id="wc-b" placeholder="Business unit"><input id="wc-s" placeholder="Stage">
+        <input id="wc-v" placeholder="Value SAR" inputmode="numeric">
         <button class="btn sm primary" onclick="addWorkingCustom()">Add</button>
       </div>
     </div>`}`;
   document.getElementById('m-foot').innerHTML=`
     <button class="btn" onclick="closeModal()">Close</button>
-    ${cfg.mode==='manual'?'<button class="btn sm ghost" onclick="clearWorkingPicks()">Clear the selection</button>':''}
+    ${cfg.mode==='manual'?'<button class="btn sm ghost" onclick="clearWorkingPicks()">Clear the list</button>':''}
     <button class="btn primary" onclick="closeModal();renderSlides()">Done</button>`;
   document.getElementById('modal-back').classList.add('open');
+}
+/* the rows on the slide can be reordered and removed one by one */
+function moveWorkingRow(i, dir){
+  const cfg=workingCfg();
+  const rows=workingRows();
+  const j=i+dir;
+  if(j<0 || j>=rows.length) return;
+  const a=rows[i], b=rows[j];
+  const idxOf=r=>r.key!==undefined ? {list:cfg.picks, at:cfg.picks.indexOf(r.key)} : {list:cfg.custom, at:r.custom};
+  const A=idxOf(a), B=idxOf(b);
+  if(A.list===B.list){
+    const L=A.list; const t=L[A.at]; L[A.at]=L[B.at]; L[B.at]=t;
+  } else {
+    /* moving across the two groups: rebuild both from the displayed order */
+    const order=rows.slice(); order.splice(j,0,order.splice(i,1)[0]);
+    cfg.picks=order.filter(r=>r.key!==undefined).map(r=>r.key);
+    cfg.custom=order.filter(r=>r.key===undefined).map(r=>({name:r.name,type:r.type,bu:r.bu,stage:r.stage,val:r.val}));
+  }
+  save('slides'); openWorkingPicker();
+}
+function dropWorkingRow(i){
+  const cfg=workingCfg();
+  const r=workingRows()[i];
+  if(!r) return;
+  if(r.key!==undefined){ const k=cfg.picks.indexOf(r.key); if(k>=0) cfg.picks.splice(k,1); }
+  else cfg.custom.splice(r.custom,1);
+  save('slides'); openWorkingPicker();
+}
+function sortWorkingByValue(){
+  const cfg=workingCfg();
+  const rows=workingRows().slice().sort((a,b)=>b.val-a.val);
+  cfg.picks=rows.filter(r=>r.key!==undefined).map(r=>r.key);
+  cfg.custom=rows.filter(r=>r.key===undefined).map(r=>({name:r.name,type:r.type,bu:r.bu,stage:r.stage,val:r.val}));
+  save('slides'); openWorkingPicker();
+  toast('Sorted by value');
 }
 /* only the list is redrawn while typing, so the search box keeps the caret */
 function workingListHtml(q){
   const cfg=workingCfg();
   const all=workingCandidates();
   const s=String(q||'').toLowerCase();
-  const shown=s?all.filter(c=>(c.co+' '+c.bu+' '+c.stage).toLowerCase().includes(s)):all;
-  if(!shown.length) return '<div class="empty">Nothing matches that search.</div>';
+  const chosen=new Set(cfg.picks||[]);
+  const shown=(s?all.filter(c=>(c.co+' '+c.bu+' '+c.stage).toLowerCase().includes(s)):all)
+    .filter(c=>!chosen.has(c.key));          /* already on the slide, so not offered again */
+  if(!shown.length) return '<div class="empty">Nothing left to add for that search.</div>';
   return shown.slice(0,160).map(c=>`<label style="display:flex;align-items:center;gap:9px;padding:5px 0;border-bottom:1px solid var(--fi-grey20);cursor:pointer">
-      <input type="checkbox" ${ (cfg.picks||[]).includes(c.key)?'checked':''} onchange="toggleWorkingPick('${c.key}')">
+      <input type="checkbox" onchange="toggleWorkingPick('${c.key}')">
       <div style="flex:1;min-width:0">
         <div style="font-size:12.5px;font-weight:700" dir="auto">${esc(c.co)}</div>
-        <div class="cell-sub">${esc(c.bu)} · ${esc(c.stage||'Not started')}${c.registered?' · already registered':''}</div>
+        <div class="cell-sub">${esc(c.type||'')}${c.type?' · ':''}${esc(c.bu)} · ${esc(c.stage||'Not started')}${c.registered?' · already registered':''}</div>
       </div>
       <span class="cell-sub" style="white-space:nowrap">${c.val?fmtNum(c.val):'no value yet'}</span>
     </label>`).join('')
@@ -2222,9 +2285,9 @@ function toggleWorkingPick(key){
     c.picks.push(key);
   }
   save('slides');
-  const n=(c.picks||[]).length+(c.custom||[]).length;
-  const note=document.querySelector('#m-body .count-note');
-  if(note) note.textContent=n+' selected, up to 12 fit the slide';
+  openWorkingPicker();
+  const el=document.getElementById('wp-q');
+  if(el){ el.focus(); el.setSelectionRange(el.value.length, el.value.length); }
 }
 function addWorkingCustom(){
   const g=i=>String((document.getElementById(i)||{}).value||'').trim();
@@ -2232,7 +2295,7 @@ function addWorkingCustom(){
   if(!n){ toast('A company name is needed', true); return; }
   const c=workingCfg();
   c.custom=c.custom||[];
-  c.custom.push({name:n, bu:g('wc-b'), stage:g('wc-s'), val:parseInt(g('wc-v').replace(/\D/g,''),10)||0});
+  c.custom.push({name:n, type:g('wc-t'), bu:g('wc-b'), stage:g('wc-s'), val:parseInt(g('wc-v').replace(/\D/g,''),10)||0});
   save('slides'); openWorkingPicker();
 }
 function removeWorkingCustom(i){ const c=workingCfg(); c.custom.splice(i,1); save('slides'); openWorkingPicker(); }
@@ -6190,11 +6253,13 @@ async function buildPPT(){
     {
       const pot=workingRows();
       const rows=ruled(
-        {cells:[th('Consultant / client'), th('Business unit'), th('Stage'), Object.assign(th('Potential value, SAR'),{align:'r',redLeft:true})], h:PX(0.32)},
-        pot.map(r=>({cells:[td(r.name), td(r.bu), td(r.stage), num(r.val?fmtNum(r.val):'to be valued',{bold:true,redLeft:true})], h:PX(0.33)}))
+        {cells:[th('Consultant / client'), th('Customer type'), th('Business unit'), th('Stage'),
+                Object.assign(th('Potential value, SAR'),{align:'r',redLeft:true})], h:PX(0.32)},
+        pot.map(r=>({cells:[td(r.name), td(r.type||'–'), td(r.bu), td(r.stage),
+          num(r.val?fmtNum(r.val):'to be valued',{bold:true,redLeft:true})], h:PX(0.33)}))
       );
       slides.push(page('Top vendor list — working on',
-        pTable(20, M, PX(1.0), CW, [PX(3.4),PX(1.8),PX(1.7),PX(2.1)], rows, {redCol:3})));
+        pTable(20, M, PX(1.0), CW, [PX(2.85),PX(1.45),PX(1.5),PX(1.5),PX(1.86)], rows, {redCol:4})));
     }
 
     /* ---------- 6 leads ---------- */
