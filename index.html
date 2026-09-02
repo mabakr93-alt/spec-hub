@@ -240,6 +240,7 @@ td[contenteditable]:focus,th[contenteditable]:focus,[contenteditable].ed:focus{b
 #modal-back{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:100;display:none;align-items:flex-start;justify-content:center;padding:4vh 14px;overflow-y:auto}
 #modal-back.open{display:flex}
 #modal{background:#fff;border-radius:14px;box-shadow:var(--shadow-lg);width:100%;max-width:640px;overflow:hidden;animation:pop .14s ease-out}
+#modal.wide{max-width:1000px}
 @keyframes pop{from{transform:translateY(8px);opacity:.6}to{transform:none;opacity:1}}
 #modal .m-head{display:flex;align-items:center;padding:15px 20px;border-bottom:1px solid var(--line)}
 #modal .m-head h3{font-size:15px;font-weight:800}
@@ -2029,11 +2030,15 @@ function parseValueLines(){
      group the totals by the vendor they match, keeping the source names visible */
   const byVendor=new Map(), unmatched=[];
   totals.forEach((mn,name)=>{
-    const v=S.vendors.find(x=>namesLikelySame(name, x[VF.COMPANY]));
-    if(!v){ unmatched.push({name, mn, matched:'', id:0, from:[name]}); return; }
-    const cur=byVendor.get(v[VF.ID]);
-    if(cur){ cur.mn+=mn; cur.from.push(name); }
-    else byVendor.set(v[VF.ID], {name, mn, matched:v[VF.COMPANY], id:v[VF.ID], from:[name]});
+    let hit=null, via='';
+    for(const x of S.vendors){
+      const m=namesMatchLoose(name, x[VF.COMPANY]);
+      if(m.ok){ hit=x; via=m.via; break; }
+    }
+    if(!hit){ unmatched.push({name, mn, matched:'', id:0, from:[name], via:''}); return; }
+    const cur=byVendor.get(hit[VF.ID]);
+    if(cur){ cur.mn+=mn; cur.from.push(name); if(via && !cur.via) cur.via=via; }
+    else byVendor.set(hit[VF.ID], {name, mn, matched:hit[VF.COMPANY], id:hit[VF.ID], from:[name], via});
   });
   const out=[...byVendor.values(), ...unmatched];
   out.sort((a,b)=>b.mn-a.mn);
@@ -2048,7 +2053,7 @@ function previewValueImport(){
   box.innerHTML=`<div class="cell-sub" style="margin-bottom:5px">${rows._rows} project row(s) read${rows._skipped?', '+rows._skipped+' unreadable':''} · ${rows.length} compan${rows.length===1?'y':'ies'} totalled · <b>${hit} matched</b> your vendor list</div>
     <div class="tbl-wrap" style="max-height:190px"><table class="tbl"><thead><tr><th>From your list</th><th>Matched vendor</th><th style="text-align:right">SAR millions</th></tr></thead><tbody>
     ${rows.map(r=>`<tr><td style="font-size:12px">${esc(r.from.join(' + '))}</td>
-      <td style="font-size:12px">${r.matched?esc(r.matched):'<span class="due-late">no match, will be skipped</span>'}</td>
+      <td style="font-size:12px">${r.matched?esc(r.matched)+(r.via?`<div class="cell-sub">matched on “${esc(r.via)}”</div>`:''):'<span class="due-late">no match, will be skipped</span>'}</td>
       <td style="text-align:right;font-size:12px">${fmtNum(Math.round(r.mn*100)/100)}</td></tr>`).join('')}
     </tbody></table></div>`;
 }
@@ -2159,6 +2164,7 @@ function openSuccessPhotos(){
     <button class="btn navy" onclick="addStory()">+ Add a story</button>
     <button class="btn primary" onclick="closeModal();renderSlides()">Done</button>`;
   document.getElementById('modal-back').classList.add('open');
+  wideModal(true);
 }
 function pickSuccessPhoto(story, slot){
   const el=document.createElement('input');
@@ -2194,17 +2200,23 @@ function removeSuccessPhoto(story, slot){
 }
 
 /* ---- which rows appear on "Top vendor list, working on" ---- */
+/* a row with no project value behind it can carry a figure entered by hand */
+function workingVals(){ S.slides.workingVals = S.slides.workingVals || {}; return S.slides.workingVals; }
+function setWorkingVal(key, v){
+  const n=parseInt(String(v||'').replace(/[^\d]/g,''),10);
+  if(n>0) workingVals()[key]=n; else delete workingVals()[key];
+  save('slides'); openWorkingPicker();
+}
 function workingCfg(){
   S.slides.working = S.slides.working || {mode:'auto', picks:[], custom:[]};
   return S.slides.working;
 }
-/* the automatic list: every SBU not yet registered, active stages first */
+/* the automatic list: the SBUs marked Potential that are not registered yet */
 function workingAuto(){
-  const rank={'In the Drawings':0,'Waiting for a Response':1,'In Progress':2,'Potential':3,'Not Started':4};
   return workingCandidates()
-    .filter(c=>!c.registered)
-    .sort((a,b)=>(rank[a.stage]??5)-(rank[b.stage]??5) || b.val-a.val)
-    .map(c=>({co:c.co, sbu:c.bu, stage:c.stage||'Not Started'}));
+    .filter(c=>!c.registered && String(c.stage||'')==='Potential')
+    .sort((a,b)=>b.val-a.val)
+    .map(c=>({co:c.co, sbu:c.bu, stage:c.stage}));
 }
 function workingCandidates(){
   const out=[];
@@ -2214,7 +2226,10 @@ function workingCandidates(){
     out.push({key:v[VF.ID]+'|'+k, co:v[VF.COMPANY], type:v[VF.TYPE]||'',
       bu:BU_LABELS[k].replace('Hanger & Support','H&S'),
       stage: done ? (sbuVL(b)?'In the vendor list':'In the drawings') : sbuStage(b),
-      registered: !!done, val: vendorPotential(v,k), cls: classOf(v[VF.TYPE], v[VF.PRIO])});
+      registered: !!done,
+      val: workingVals()[v[VF.ID]+'|'+k] || vendorPotential(v,k),
+      manual: !!workingVals()[v[VF.ID]+'|'+k],
+      cls: classOf(v[VF.TYPE], v[VF.PRIO])});
   }));
   return out.sort((a,b)=>b.val-a.val || a.co.localeCompare(b.co));
 }
@@ -2224,7 +2239,9 @@ function workingRows(){
     return workingAuto().map(p=>{
       const v=S.vendors.find(x=>_norm(x[VF.COMPANY])===_norm(p.co));
       const key=BU_KEYS.find(k=>BU_LABELS[k].replace('Hanger & Support','H&S')===p.sbu);
-      return {name:p.co, bu:p.sbu, stage:p.stage, type:v?v[VF.TYPE]:'', val:v&&key?vendorPotential(v,key):0};
+      const k2=v&&key ? v[VF.ID]+'|'+key : '';
+      return {name:p.co, bu:p.sbu, stage:p.stage, type:v?v[VF.TYPE]:'', key:k2,
+              val: (k2&&workingVals()[k2]) || (v&&key?vendorPotential(v,key):0)};
     }).sort((a,b)=>b.val-a.val).slice(0,9);
   }
   const all=workingCandidates();
@@ -2254,20 +2271,25 @@ function openWorkingPicker(){
     <div class="doc-sec" style="margin-bottom:12px">
       <h3>On the slide now — ${chosen.length}
         ${cfg.mode==='manual'?'<button class="btn sm" style="margin-right:8px" onclick="sortWorkingByValue()">Sort by value</button>':''}</h3>
-      ${chosen.length? `<table class="tbl"><thead><tr><th style="width:26px">#</th><th>Company</th><th style="width:110px">Customer type</th><th style="width:110px">Business unit</th><th style="width:120px">Stage</th><th style="width:110px;text-align:right">Value SAR</th>${cfg.mode==='manual'?'<th style="width:96px"></th>':''}</tr></thead><tbody>
+      ${chosen.length? `<div class="tbl-wrap" style="overflow-x:auto"><table class="tbl" style="table-layout:fixed;width:100%"><thead><tr><th style="width:26px">#</th><th style="width:30%">Company</th><th style="width:12%">Type</th><th style="width:14%">Business unit</th><th style="width:13%">Stage</th><th style="width:16%;text-align:right">Value SAR</th>${cfg.mode==='manual'?'<th style="width:11%"></th>':''}</tr></thead><tbody>
         ${chosen.map((r,i)=>`<tr>
           <td class="num">${i+1}</td>
           <td style="font-size:12.5px;font-weight:700" dir="auto">${esc(r.name)}</td>
-          <td style="font-size:12px">${esc(r.type||'—')}</td>
-          <td style="font-size:12px">${esc(r.bu||'')}</td>
-          <td style="font-size:12px">${esc(r.stage||'')}</td>
-          <td style="text-align:right;font-size:12px">${r.val?fmtNum(r.val):'—'}</td>
+          <td style="font-size:11.5px">${esc(r.type||'—')}</td>
+          <td style="font-size:11.5px">${esc(r.bu||'')}</td>
+          <td style="font-size:11.5px">${esc(r.stage||'')}</td>
+          <td style="text-align:right;font-size:12px">${
+            r.key ? `<input value="${r.val?fmtNum(r.val):''}" placeholder="add a value"
+                       style="width:100%;max-width:104px;text-align:right;font-size:11.5px${workingVals()[r.key]?';border-color:var(--fi-red)':''}"
+                       title="${workingVals()[r.key]?'Entered by hand. Clear the box to go back to the calculated figure.':'Calculated from the project value. Type here to override it.'}"
+                       onclick="event.stopPropagation()" onchange="setWorkingVal('${r.key}', this.value)">`
+                  : (r.val?fmtNum(r.val):'—')}</td>
           ${cfg.mode==='manual'?`<td style="white-space:nowrap">
             <button class="icon-btn" title="Move up" ${i===0?'disabled':''} onclick="moveWorkingRow(${i},-1)">▲</button>
             <button class="icon-btn" title="Move down" ${i===chosen.length-1?'disabled':''} onclick="moveWorkingRow(${i},1)">▼</button>
             <button class="icon-btn" title="Remove from the slide" onclick="dropWorkingRow(${i})">✕</button></td>`:''}
         </tr>`).join('')}
-      </tbody></table>`
+      </tbody></table></div>`
       : '<div class="empty">Nothing on this slide yet.</div>'}
       ${cfg.mode!=='manual'?'<div class="mini-note" style="margin-top:6px">This list follows the SBUs marked Potential. Switch to “I choose the rows” to arrange or remove them.</div>':''}
     </div>
@@ -2297,6 +2319,7 @@ function openWorkingPicker(){
     ${cfg.mode==='manual'?'<button class="btn sm ghost" onclick="clearWorkingPicks()">Clear the list</button>':''}
     <button class="btn primary" onclick="closeModal();renderSlides()">Done</button>`;
   document.getElementById('modal-back').classList.add('open');
+  wideModal(true);
 }
 /* the rows on the slide can be reordered and removed one by one */
 function moveWorkingRow(i, dir){
@@ -2760,12 +2783,50 @@ function tokenMatch(a,b){
   const m=Math.min(a.length,b.length);
   return m>=4 && (a.startsWith(b)||b.startsWith(a));
 }
+/* Company names carry aliases: "edarat group (Humain)", "Omrania (egis)",
+   "ETIHAD RAIL - AL FAYA". A project list usually holds only one of the forms,
+   so every form is compared. Generic qualifiers such as "(Saudi Arabia)" are not
+   treated as aliases, otherwise every branch would match every other branch. */
+const ALIAS_STOP=new Set(['saudi arabia','saudiarabia','ksa','uae','qatar','egypt','bahrain','kuwait','oman',
+  'dubai','abu dhabi','riyadh','jeddah','dammam','khobar','branch','main branch','head office','ho',
+  'ltd','llc','wll','co','company','group','main','new','old','saudi']);
+function nameAliases(s){
+  const raw=String(s||'').trim();
+  if(!raw) return [];
+  const out=[raw];
+  /* text outside the brackets */
+  const outside=raw.replace(/\([^)]*\)?/g,' ').replace(/\s+/g,' ').trim();
+  if(outside && outside.length>=3) out.push(outside);
+  /* each bracketed form, without a leading "formerly" and the like */
+  (raw.match(/\(([^)]*)\)?/g)||[]).forEach(b=>{
+    const inner=b.replace(/[()]/g,'').replace(/^\s*(formerly|previously|prev\.?|ex|was|now)\s+/i,'').trim();
+    if(inner.length>=3 && !ALIAS_STOP.has(inner.toLowerCase())) out.push(inner);
+  });
+  /* two names joined by a dash or a slash */
+  raw.split(/\s+-\s+|\s*\/\s*|\s+&\s+(?=[A-Z]{2,})/).forEach(p=>{
+    const t=p.replace(/\([^)]*\)?/g,' ').replace(/\s+/g,' ').trim();
+    if(t.length>=3 && t!==raw && !ALIAS_STOP.has(t.toLowerCase())) out.push(t);
+  });
+  return [...new Set(out.filter(x=>x && x.length>=3))];
+}
+/* true when any form of one name matches any form of the other */
+function namesMatchLoose(a, b){
+  const A=nameAliases(a), B=nameAliases(b);
+  for(const x of A) for(const y of B) if(namesLikelySame(x,y)) return {ok:true, via:(x.toLowerCase()===String(a).toLowerCase()&&y.toLowerCase()===String(b).toLowerCase())?'':x+' = '+y};
+  return {ok:false, via:''};
+}
 function namesLikelySame(n1,n2){
   const A=nameTokens(n1), B=nameTokens(n2);
   if(!A.length || !B.length) return false;
+  const m=Math.min(A.length,B.length);
+  /* A one-word name must match a word exactly. Prefix matching there is what let
+     "Humain Data Centres" attach itself to "datavolt" through the word "data". */
+  if(m===1){
+    const short=(A.length===1?A:B), long=(A.length===1?B:A);
+    return long.some(t=>t===short[0]);
+  }
   let hit=0;
   A.forEach(a=>{ if(B.some(b=>tokenMatch(a,b))) hit++; });
-  const m=Math.min(A.length,B.length);
   if(m>=3 && hit<2) return false;         /* long names need more than one word in common */
   return hit/m >= 0.75;
 }
@@ -5567,7 +5628,12 @@ function addDatedNote(inp){
   h.querySelector('.cm-list').innerHTML=noteCards(box.value);
   inp.value=''; inp.focus();
 }
-function closeModal(){ document.getElementById('modal-back').classList.remove('open'); }
+function wideModal(on){
+  const m=document.getElementById('modal');
+  if(m) m.classList[on?'add':'remove']('wide');
+}
+function closeModal(){
+  wideModal(false); document.getElementById('modal-back').classList.remove('open'); }
 /* clicking the dim area no longer closes the form: too easy to lose typed data.
    Close with Cancel, the X, or the Esc key. */
 document.getElementById('modal-back').addEventListener('click',e=>{
