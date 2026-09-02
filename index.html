@@ -2035,7 +2035,18 @@ function parseValueLines(){
       const m=namesMatchLoose(name, x[VF.COMPANY]);
       if(m.ok){ hit=x; via=m.via; break; }
     }
-    if(!hit){ unmatched.push({name, mn, matched:'', id:0, from:[name], via:''}); return; }
+    if(!hit){
+      /* say which vendor came closest, so a spelling difference is obvious */
+      let best='', bestD=99;
+      const nt=nameTokens(name).join('');
+      S.vendors.forEach(x=>nameAliases(x[VF.COMPANY]).forEach(al=>{
+        const d=editDist(nt, nameTokens(al).join(''));
+        if(d<bestD){ bestD=d; best=x[VF.COMPANY]; }
+      }));
+      unmatched.push({name, mn, matched:'', id:0, from:[name], via:'',
+        near:(bestD<=4?best:'')});
+      return;
+    }
     const cur=byVendor.get(hit[VF.ID]);
     if(cur){ cur.mn+=mn; cur.from.push(name); if(via && !cur.via) cur.via=via; }
     else byVendor.set(hit[VF.ID], {name, mn, matched:hit[VF.COMPANY], id:hit[VF.ID], from:[name], via});
@@ -2053,7 +2064,9 @@ function previewValueImport(){
   box.innerHTML=`<div class="cell-sub" style="margin-bottom:5px">${rows._rows} project row(s) read${rows._skipped?', '+rows._skipped+' unreadable':''} · ${rows.length} compan${rows.length===1?'y':'ies'} totalled · <b>${hit} matched</b> your vendor list</div>
     <div class="tbl-wrap" style="max-height:190px"><table class="tbl"><thead><tr><th>From your list</th><th>Matched vendor</th><th style="text-align:right">SAR millions</th></tr></thead><tbody>
     ${rows.map(r=>`<tr><td style="font-size:12px">${esc(r.from.join(' + '))}</td>
-      <td style="font-size:12px">${r.matched?esc(r.matched)+(r.via?`<div class="cell-sub">matched on “${esc(r.via)}”</div>`:''):'<span class="due-late">no match, will be skipped</span>'}</td>
+      <td style="font-size:12px">${r.matched
+        ? esc(r.matched)+(r.via?`<div class="cell-sub">matched on “${esc(r.via)}”</div>`:'')
+        : '<span class="due-late">no match, will be skipped</span>'+(r.near?`<div class="cell-sub">closest is “${esc(r.near)}”</div>`:'')}</td>
       <td style="text-align:right;font-size:12px">${fmtNum(Math.round(r.mn*100)/100)}</td></tr>`).join('')}
     </tbody></table></div>`;
 }
@@ -2793,10 +2806,36 @@ function nameTokens(s){
     .split(/\s+/)
     .filter(w=>w && !NAME_STOP.has(w));
 }
+/* how many single-letter edits separate two words, counting a swap of two
+   neighbouring letters as one. Humain and Humian are one swap apart. */
+function editDist(a,b){
+  if(a===b) return 0;
+  const n=a.length, m=b.length;
+  if(Math.abs(n-m)>2) return 9;
+  const d=[];
+  for(let i=0;i<=n;i++){ d[i]=[i]; }
+  for(let j=0;j<=m;j++){ d[0][j]=j; }
+  for(let i=1;i<=n;i++){
+    for(let j=1;j<=m;j++){
+      const c=a[i-1]===b[j-1]?0:1;
+      d[i][j]=Math.min(d[i-1][j]+1, d[i][j-1]+1, d[i-1][j-1]+c);
+      if(i>1 && j>1 && a[i-1]===b[j-2] && a[i-2]===b[j-1]) d[i][j]=Math.min(d[i][j], d[i-2][j-2]+1);
+    }
+  }
+  return d[n][m];
+}
+/* a word tolerates one typo from five letters, two from nine */
+function nearWord(a,b){
+  if(a===b) return true;
+  const m=Math.min(a.length,b.length);
+  if(m<5) return false;
+  return editDist(a,b) <= (m>=9?2:1);
+}
 function tokenMatch(a,b){
   if(a===b) return true;
   const m=Math.min(a.length,b.length);
-  return m>=4 && (a.startsWith(b)||b.startsWith(a));
+  if(m>=4 && (a.startsWith(b)||b.startsWith(a))) return true;
+  return nearWord(a,b);
 }
 /* Company names carry aliases: "edarat group (Humain)", "Omrania (egis)",
    "ETIHAD RAIL - AL FAYA". A project list usually holds only one of the forms,
@@ -2837,8 +2876,10 @@ function namesLikelySame(n1,n2){
   /* A one-word name must match a word exactly. Prefix matching there is what let
      "Humain Data Centres" attach itself to "datavolt" through the word "data". */
   if(m===1){
+    /* a one-word name must match a whole word, allowing for a typo, but never a
+       mere prefix: that is what wrongly tied "Data Centres" to "datavolt" */
     const short=(A.length===1?A:B), long=(A.length===1?B:A);
-    return long.some(t=>t===short[0]);
+    return long.some(t=>nearWord(t, short[0]));
   }
   let hit=0;
   A.forEach(a=>{ if(B.some(b=>tokenMatch(a,b))) hit++; });
