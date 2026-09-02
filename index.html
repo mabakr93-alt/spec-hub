@@ -2133,17 +2133,23 @@ function openSuccessPhotos(){
             <button class="btn sm" style="margin-right:8px" onclick="draftOutcome(${i})">✎ Draft the outcome</button></label>
             <textarea style="min-height:92px" onchange="setStoryField(${i},'outcome',this.value)">${esc(s.outcome||'')}</textarea></div>
         </div>
-        <div style="display:flex;gap:9px;flex-wrap:wrap;margin-top:8px">
-          ${[0,1,2].map(k=>{
-            const d=(s.photos||[])[k] ? (S.images||{})[s.photos[k]] : null;
+        <div style="display:flex;gap:9px;flex-wrap:wrap;margin-top:8px;align-items:flex-start">
+          ${(s.photos||[]).filter(Boolean).map((pid,k)=>{
+            const d=(S.images||{})[pid];
             return `<div style="width:168px">
               <div style="width:168px;height:96px;border:1px solid var(--fi-grey);background:var(--fi-grey20);display:flex;align-items:center;justify-content:center;overflow:hidden">
-                ${d?`<img src="${d}" style="width:100%;height:100%;object-fit:cover">`:'<span class="cell-sub">empty</span>'}
+                ${d?`<img src="${d}" style="width:100%;height:100%;object-fit:cover">`:'<span class="cell-sub">missing</span>'}
               </div>
               <div style="display:flex;gap:5px;margin-top:5px">
-                <button class="btn sm" style="flex:1" onclick="pickSuccessPhoto(${i},${k})">${d?'Replace':'Add photo'}</button>
-                ${d?`<button class="btn sm ghost danger-line" onclick="removeSuccessPhoto(${i},${k})">✕</button>`:''}
-              </div></div>`;}).join('')}
+                <button class="btn sm" style="flex:1" onclick="pickSuccessPhoto(${i},${k})">Replace</button>
+                <button class="btn sm ghost danger-line" onclick="removeSuccessPhoto(${i},${k})" title="Remove this photograph">✕</button>
+              </div>
+              <div class="cell-sub" style="text-align:center;margin-top:2px">${k+1}</div>
+            </div>`;}).join('')}
+          <div style="width:168px">
+            <button class="btn sm" style="width:168px;height:96px;border-style:dashed" onclick="pickSuccessPhoto(${i})">+ Add photo</button>
+            <div class="cell-sub" style="text-align:center;margin-top:5px">${(s.photos||[]).filter(Boolean).length} photograph${(s.photos||[]).filter(Boolean).length===1?'':'s'}</div>
+          </div>
         </div>
       </div>`).join('')}
     <datalist id="sbu-list">${SEED_DATA.options.sbu.map(o=>`<option value="${esc(o)}">`).join('')}</datalist>
@@ -2169,8 +2175,9 @@ function pickSuccessPhoto(story, slot){
       imgStore()[id]=m.data; imgDims()[id]={w:m.w, h:m.h};
       save('images'); save('meta');
       const s=stories()[story]; if(!s) return;
-      s.photos = s.photos || [];
-      s.photos[slot]=id;
+      s.photos = (s.photos||[]).filter(Boolean);
+      if(slot===undefined || slot===null || slot>=s.photos.length) s.photos.push(id);
+      else s.photos[slot]=id;
       save('slides'); openSuccessPhotos();
       logChange('Success story photograph added', 'Slides');
     }catch(e){ toast('Could not add that picture: '+e.message, true); }
@@ -2179,8 +2186,9 @@ function pickSuccessPhoto(story, slot){
 }
 function removeSuccessPhoto(story, slot){
   const s=stories()[story]; if(!s) return;
-  const id=(s.photos||[])[slot];
-  s.photos[slot]='';
+  s.photos=(s.photos||[]).filter(Boolean);
+  const id=s.photos[slot];
+  s.photos.splice(slot,1);                       /* the rest close the gap */
   if(id && imgStore()[id]){ delete imgStore()[id]; save('images'); }
   save('slides'); openSuccessPhotos();
 }
@@ -2189,6 +2197,14 @@ function removeSuccessPhoto(story, slot){
 function workingCfg(){
   S.slides.working = S.slides.working || {mode:'auto', picks:[], custom:[]};
   return S.slides.working;
+}
+/* the automatic list: every SBU not yet registered, active stages first */
+function workingAuto(){
+  const rank={'In the Drawings':0,'Waiting for a Response':1,'In Progress':2,'Potential':3,'Not Started':4};
+  return workingCandidates()
+    .filter(c=>!c.registered)
+    .sort((a,b)=>(rank[a.stage]??5)-(rank[b.stage]??5) || b.val-a.val)
+    .map(c=>({co:c.co, sbu:c.bu, stage:c.stage||'Not Started'}));
 }
 function workingCandidates(){
   const out=[];
@@ -2205,7 +2221,7 @@ function workingCandidates(){
 function workingRows(){
   const cfg=workingCfg();
   if(cfg.mode!=='manual'){
-    return potentialSbus().map(p=>{
+    return workingAuto().map(p=>{
       const v=S.vendors.find(x=>_norm(x[VF.COMPANY])===_norm(p.co));
       const key=BU_KEYS.find(k=>BU_LABELS[k].replace('Hanger & Support','H&S')===p.sbu);
       return {name:p.co, bu:p.sbu, stage:p.stage, type:v?v[VF.TYPE]:'', val:v&&key?vendorPotential(v,key):0};
@@ -2258,7 +2274,11 @@ function openWorkingPicker(){
 
     ${cfg.mode!=='manual'?'':`
     <div class="doc-sec">
-      <h3>Add from the vendor list</h3>
+      <h3>Add from the vendor list <span class="cell-sub" style="font-weight:600">${(S.meta&&S.meta.wpPotOnly)?'SBUs marked Potential':'everything not registered yet'}</span></h3>
+      <div class="chip-row" style="margin-bottom:7px">
+        <button class="chip ${!(S.meta&&S.meta.wpPotOnly)?'on':''}" onclick="S.meta.wpPotOnly=false;save('meta');openWorkingPicker()">Every stage not registered</button>
+        <button class="chip ${(S.meta&&S.meta.wpPotOnly)?'on':''}" onclick="S.meta.wpPotOnly=true;save('meta');openWorkingPicker()">Potential only</button>
+      </div>
       <div class="f-field" style="margin-bottom:8px">
         <input id="wp-q" placeholder="Search company or business unit…" value="${esc(q)}" oninput="filterWorkingList(this.value)">
       </div>
@@ -2319,9 +2339,20 @@ function workingListHtml(q){
   const all=workingCandidates();
   const s=String(q||'').toLowerCase();
   const chosen=new Set(cfg.picks||[]);
-  const shown=(s?all.filter(c=>(c.co+' '+c.bu+' '+c.stage).toLowerCase().includes(s)):all)
-    .filter(c=>!chosen.has(c.key));          /* already on the slide, so not offered again */
-  if(!shown.length) return '<div class="empty">Nothing left to add for that search.</div>';
+  /* this slide is about the potential ones, so those are what the list offers.
+     "Every stage" is there for the occasional exception. */
+  /* working on means still to be approached, so a registered SBU never appears.
+     By default the list carries everything not yet registered, Not Started included,
+     with the active stages first. "Potential only" narrows it when you want that. */
+  const potentialOnly = !!(S.meta && S.meta.wpPotOnly);
+  let pool=all.filter(c=>!chosen.has(c.key) && !c.registered);
+  if(potentialOnly) pool=pool.filter(c=>String(c.stage||'')==='Potential');
+  const rank={'In the Drawings':0,'Waiting for a Response':1,'In Progress':2,'Potential':3,'Not Started':4};
+  pool.sort((a,b)=>(rank[a.stage]??5)-(rank[b.stage]??5) || b.val-a.val || a.co.localeCompare(b.co));
+  const shown = s ? pool.filter(c=>(c.co+' '+c.bu+' '+c.stage).toLowerCase().includes(s)) : pool;
+  if(!shown.length) return '<div class="empty">'
+    + (potentialOnly ? 'Nothing marked Potential is left to add. Switch to “Every stage not registered”.'
+                     : 'Nothing left to add for that search.') + '</div>';
   return shown.slice(0,160).map(c=>`<label style="display:flex;align-items:center;gap:9px;padding:5px 0;border-bottom:1px solid var(--fi-grey20);cursor:pointer">
       <input type="checkbox" onchange="toggleWorkingPick('${c.key}')">
       <div style="flex:1;min-width:0">
@@ -6355,7 +6386,7 @@ async function buildPPT(){
       const list=(S.slides.stories||[]).filter(s=>s.client||s.project||s.outcome||(s.photos||[]).filter(Boolean).length);
       const useList = list.length ? list : [{client:'',project:'',sbu:'',outcome:'',photos:[]}];
       useList.forEach((ss,si)=>{
-        const pics=(ss.photos||[]).filter(Boolean).slice(0,3);
+        const pics=(ss.photos||[]).filter(Boolean);
         const full=(ss.photoMode||'full')!=='inline';
         const fact=(id,x,yy,w,label,text)=>
           pRect(id, x, yy, w, PX(0.02), FI_BLACK)
@@ -6376,19 +6407,32 @@ async function buildPPT(){
                     pPara(pRun(pics.length+' photograph'+(pics.length>1?'s':'')+' on the following '+(pics.length>1?'slides':'slide'),
                       {size:9,color:FI_GREY}))) : '')
                : (()=>{
-                   const boxW=PX(2.94), boxH=PX(1.72), yy=PX(3.22);
+                   /* the strip adapts to how many there are, and each photograph is
+                      fitted inside its cell rather than stretched to fill it */
+                   const n=Math.max(1, Math.min(pics.length, 8));
+                   const cols = n<=4 ? n : Math.ceil(n/2);   /* one row up to four, then two rows */
+                   const rowsN=Math.ceil(n/cols);
+                   const gap=PX(0.14), rowGap=PX(0.1);
+                   const areaY=rowsN>1?PX(2.92):PX(3.22);
+                   const areaH=rowsN>1?PX(2.02):PX(1.72);
+                   const cellW=Math.round((CW-(cols-1)*gap)/cols);
+                   const cellH=Math.round((areaH-(rowsN-1)*rowGap)/rowsN);
                    let out='', id=62;
-                   for(let k=0;k<3;k++){
-                     const x=M+k*(boxW+PX(0.14));
-                     out += pics[k] ? pPic(id++, 'rIdP'+k, x, yy, boxW, boxH)
-                                    : pRect(id++, x, yy, boxW, boxH, FI_GREY20);
+                   for(let k=0;k<n;k++){
+                     const r=Math.floor(k/cols), c=k%cols;
+                     const cx=M+c*(cellW+gap), cy=areaY+r*(cellH+rowGap);
+                     if(!pics[k]){ out+=pRect(id++, cx, cy, cellW, cellH, FI_GREY20); continue; }
+                     const d=(S.meta.imgDims||{})[pics[k]] || {w:4, h:3};
+                     const sc=Math.min(cellW/d.w, cellH/d.h);
+                     const w=Math.round(d.w*sc), h=Math.round(d.h*sc);
+                     out += pPic(id++, 'rIdP'+k, cx+Math.round((cellW-w)/2), cy+Math.round((cellH-h)/2), w, h);
                    }
                    return out;
                  })()
         ].join('');
         const label='Success story'+(useList.length>1?'  ('+(si+1)+' of '+useList.length+')':'')
           +(ss.topic?' — '+ss.topic:'');
-        slides.push(Object.assign(page(label, body), {photos: full? [] : pics}));
+        slides.push(Object.assign(page(label, body), {photos: full? [] : pics.slice(0,8)}));
 
         /* one slide per photograph, sized to fill the page without distortion */
         if(full) pics.forEach((pid,k)=>{
